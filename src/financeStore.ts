@@ -1,0 +1,116 @@
+import { useEffect, useMemo, useState } from 'react'
+
+export type FinanceTipo = 'recebimento' | 'pagamento' | 'recibo'
+
+export type FinanceEntry = {
+  id: string
+  tipo: FinanceTipo
+  descricao: string
+  contato: string
+  conta: string
+  data: string // ISO date
+  situacao: 'Pendente' | 'Pago' | 'Recebido'
+  valor: number
+  referente?: string
+}
+
+const STORAGE_KEY = 'erp.finance.entries'
+
+const sample: FinanceEntry[] = [
+  {
+    id: '1',
+    tipo: 'recebimento',
+    descricao: 'Venda #1001',
+    contato: 'Cliente ACME',
+    conta: 'Caixa interno',
+    data: new Date().toISOString().slice(0, 10),
+    situacao: 'Recebido',
+    valor: 1200,
+    referente: 'Pedido 1001',
+  },
+  {
+    id: '2',
+    tipo: 'pagamento',
+    descricao: 'Compra fornecedor',
+    contato: 'Fornecedor XPTO',
+    conta: 'Banco',
+    data: new Date().toISOString().slice(0, 10),
+    situacao: 'Pago',
+    valor: 550,
+    referente: 'NF 2002',
+  },
+  {
+    id: '3',
+    tipo: 'recebimento',
+    descricao: 'Servico consultoria',
+    contato: 'Cliente Beta',
+    conta: 'Banco',
+    data: new Date().toISOString().slice(0, 10),
+    situacao: 'Pendente',
+    valor: 800,
+    referente: 'Consultoria novembro',
+  },
+]
+
+export function useFinanceStore() {
+  const [entries, setEntries] = useState<FinanceEntry[]>([])
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY)
+      if (raw) {
+        setEntries(JSON.parse(raw))
+      } else {
+        setEntries(sample)
+      }
+    } catch (e) {
+      setEntries(sample)
+    }
+  }, [])
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries))
+  }, [entries])
+
+  const addEntry = (data: Omit<FinanceEntry, 'id'>) => {
+    const id = crypto.randomUUID()
+    setEntries((prev) => [...prev, { ...data, id }])
+  }
+
+  const removeEntry = (id: string) => {
+    setEntries((prev) => prev.filter((item) => item.id !== id))
+  }
+
+  const summary = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10)
+    const endOfWeek = (() => {
+      const d = new Date()
+      d.setDate(d.getDate() + 7)
+      return d.toISOString().slice(0, 10)
+    })()
+
+    const between = (date: string, start: string, end: string) => date >= start && date <= end
+
+    const todayReceb = entries.filter((e) => e.tipo === 'recebimento' && e.data === today)
+    const todayPag = entries.filter((e) => e.tipo === 'pagamento' && e.data === today)
+
+    const weekReceb = entries.filter((e) => e.tipo === 'recebimento' && between(e.data, today, endOfWeek))
+    const weekPag = entries.filter((e) => e.tipo === 'pagamento' && between(e.data, today, endOfWeek))
+
+    const sum = (arr: FinanceEntry[]) => arr.reduce((acc, e) => acc + e.valor, 0)
+
+    return {
+      receberHoje: sum(todayReceb),
+      pagarHoje: sum(todayPag),
+      receberSemana: sum(weekReceb),
+      pagarSemana: sum(weekPag),
+    }
+  }, [entries])
+
+  return {
+    entries,
+    addEntry,
+    removeEntry,
+    summary,
+  }
+}
