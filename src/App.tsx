@@ -1,39 +1,63 @@
-import { useEffect, useState } from 'react'
-import { Pie, PieChart, ResponsiveContainer, Cell } from 'recharts'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Pie, PieChart, ResponsiveContainer, Cell, LineChart, Line, XAxis, Tooltip } from 'recharts'
 import { useFinanceStore, type FinanceEntry } from './financeStore'
 import { useLocalCrud } from './store'
 
-const pieData = [
-  { name: 'Eletronicos', value: 45 },
-  { name: 'Presentes', value: 30 },
-  { name: 'Acessorios', value: 25 },
-]
-
 const pieColors = ['#0f3047', '#f5a524', '#2fbf71']
 
-const alerts = [
-  { icon: 'i', text: 'Ha 12 produtos abaixo do estoque minimo.', link: 'Detalhar' },
-  { icon: '!', text: '3 financeiros a pagar atrasados.', link: 'Detalhar' },
-  { icon: 'doc', text: 'Ha avisos em notas com problemas fiscais.', link: 'Detalhar' },
-]
+const shortcuts = ['Nova venda', 'Nova compra', 'Novo cliente', 'Novo produto', 'Cadastrar conta']
 
-const metrics = [
-  { label: 'Receita bruta', value: 'R$ 0,00', tone: 'neutral' },
-  { label: 'Impostos', value: 'R$ 0,00', tone: 'neutral' },
-  { label: 'Receita liquida', value: 'R$ 0,00', tone: 'positive' },
-  { label: 'Custos', value: 'R$ 0,00', tone: 'neutral' },
-  { label: 'Despesas operacionais', value: 'R$ 0,00', tone: 'neutral' },
-  { label: 'Lucro operacional', value: 'R$ 0,00', tone: 'positive' },
-  { label: 'Despesas diversas', value: 'R$ 0,00', tone: 'neutral' },
-]
+type OnboardingStep = { id: 'config' | 'contatos' | 'produtos' | 'movimentos' | 'financeiro'; label: string; done: boolean; detail: string }
+type DashboardAlert = { id: string; text: string; tone: 'warn' | 'info' }
+type PieEntry = { name: string; value: number }
 
-const shortcuts = ['Nova venda', 'Nova compra', 'Novo cliente', 'Novo produto', 'Gerar boleto', 'Cadastrar conta']
+type ProductItem = {
+  id: string
+  nome: string
+  categoria: string
+  preco: number
+  estoque: number
+  palavras?: string
+  tipo: 'produtos' | 'servicos' | 'ajuste'
+  contato?: string
+  observacoes?: string
+  data?: string
+}
+
+const produtosSeed: ProductItem[] = [
+  { id: 'P001', nome: 'Notebook Pro', categoria: 'Eletronicos', preco: 5200, estoque: 8, palavras: 'notebook', tipo: 'produtos' },
+  { id: 'P002', nome: 'Mouse', categoria: 'Acessorios', preco: 80, estoque: 120, palavras: 'periferico', tipo: 'produtos' },
+  { id: 'S001', nome: 'Instalacao', categoria: '', preco: 150, estoque: 0, palavras: 'setup', tipo: 'servicos' },
+  { id: 'S002', nome: 'Manutencao', categoria: '', preco: 200, estoque: 0, palavras: 'suporte', tipo: 'servicos' },
+  {
+    id: 'A001',
+    nome: 'Ajuste inventario',
+    categoria: '',
+    preco: 0,
+    estoque: 0,
+    palavras: 'inventario',
+    tipo: 'ajuste',
+    contato: 'Equipe estoque',
+    observacoes: 'Ajuste trimestral',
+    data: '2025-11-10',
+  },
+]
 
 type FinanceTab = 'recebimentos' | 'pagamentos' | 'recibos'
 type SalesTab = 'vendas' | 'devolucoes'
 type PurchaseTab = 'compras'
 type ContactTab = 'clientes' | 'fornecedores' | 'transportadoras'
 type ProductTab = 'produtos' | 'servicos' | 'ajuste'
+type PurchaseItem = { produtoId: string; quantidade: number; valor: number }
+type PurchaseRecord = {
+  id: string
+  fornecedor: string
+  nota: string
+  data: string
+  situacao: string
+  itens: PurchaseItem[]
+  total: number
+}
 type ConfigTab = 'geral' | 'plano' | 'caixa' | 'operacoes' | 'formas' | 'usuarios' | 'fiscal' | 'impressao'
 type Page = 'Dashboard' | 'Financeiro' | 'Vendas' | 'Compras' | 'Clientes' | 'Produtos' | 'Relatorios' | 'Configuracoes'
 
@@ -97,11 +121,55 @@ export default function App() {
   const [activePage, setActivePage] = useState<Page>('Dashboard')
   const [financeTab, setFinanceTab] = useState<FinanceTab>('recebimentos')
   const [salesTab, setSalesTab] = useState<SalesTab>('vendas')
-  const [purchaseTab, setPurchaseTab] = useState<PurchaseTab>('compras')
+  const purchaseTab: PurchaseTab = 'compras'
   const [contactTab, setContactTab] = useState<ContactTab>('clientes')
   const [productTab, setProductTab] = useState<ProductTab>('produtos')
   const [configTab, setConfigTab] = useState<ConfigTab>('geral')
-  const { entries, addEntry, removeEntry, summary } = useFinanceStore()
+  const [shortcutNewSale, setShortcutNewSale] = useState(0)
+  const [shortcutNewPurchase, setShortcutNewPurchase] = useState(0)
+  const [shortcutNewContact, setShortcutNewContact] = useState(0)
+  const [shortcutNewProduct, setShortcutNewProduct] = useState(0)
+  const { entries, addEntry, removeEntry, updateEntry, summary } = useFinanceStore()
+  const financeRefSale = (id: string) => `sale:${id}`
+  const financeRefPurchase = (id: string) => `purchase:${id}`
+  const upsertFinanceFromSale = (sale: SaleRecord) => {
+    const ref = financeRefSale(sale.id)
+    const existing = entries.find((e) => e.referente === ref)
+    const payload: Omit<FinanceEntry, 'id'> = {
+      tipo: 'recebimento',
+      descricao: `Venda ${sale.id}`,
+      contato: sale.cliente,
+      conta: 'Caixa interno',
+      data: sale.data,
+      situacao: 'Pendente',
+      valor: sale.total,
+      referente: ref,
+    }
+    if (existing) {
+      updateEntry(existing.id, payload)
+    } else {
+      addEntry(payload)
+    }
+  }
+  const upsertFinanceFromPurchase = (purchase: PurchaseRecord) => {
+    const ref = financeRefPurchase(purchase.id)
+    const existing = entries.find((e) => e.referente === ref)
+    const payload: Omit<FinanceEntry, 'id'> = {
+      tipo: 'pagamento',
+      descricao: `Compra ${purchase.id}`,
+      contato: purchase.fornecedor,
+      conta: 'Caixa interno',
+      data: purchase.data,
+      situacao: 'Pendente',
+      valor: purchase.total,
+      referente: ref,
+    }
+    if (existing) {
+      updateEntry(existing.id, payload)
+    } else {
+      addEntry(payload)
+    }
+  }
 
   // navegacao estilo eGestor: reflete hash da URL para "trocar de pagina"
   useEffect(() => {
@@ -174,17 +242,204 @@ export default function App() {
   const navItems: Page[] = ['Dashboard', 'Financeiro', 'Vendas', 'Compras', 'Clientes', 'Produtos', 'Relatorios', 'Configuracoes']
   const placeholderNav: string[] = []
 
+  const readCount = (key: string) => {
+    try {
+      const raw = localStorage.getItem(key)
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (Array.isArray(parsed)) return parsed.length
+      }
+    } catch {
+      return 0
+    }
+    return 0
+  }
+
+  const monthFinance = useMemo(() => {
+    const today = new Date()
+    const month = today.getMonth()
+    const year = today.getFullYear()
+    const entriesMonth = entries.filter((e) => {
+      const d = new Date(e.data)
+      return !Number.isNaN(d.getTime()) && d.getMonth() === month && d.getFullYear() === year
+    })
+    const sum = (tipo: FinanceEntry['tipo']) => entriesMonth.filter((e) => e.tipo === tipo).reduce((acc, e) => acc + e.valor, 0)
+    const pend = (tipo: FinanceEntry['tipo']) =>
+      entriesMonth.filter((e) => e.tipo === tipo && e.situacao === 'Pendente').length
+    return {
+      receita: sum('recebimento'),
+      custos: sum('pagamento'),
+      pendReceber: pend('recebimento'),
+      pendPagar: pend('pagamento'),
+    }
+  }, [entries])
+
   const kpis: Kpi[] = [
-    { title: 'Contas a receber hoje', value: formatMoney(summary.receberHoje), trend: '+0%', tone: 'success' },
-    { title: 'Contas a pagar hoje', value: formatMoney(summary.pagarHoje), trend: '-0%', tone: 'danger' },
-    { title: 'A receber na semana', value: formatMoney(summary.receberSemana), trend: '+0%', tone: 'success' },
-    { title: 'A pagar na semana', value: formatMoney(summary.pagarSemana), trend: '-0%', tone: 'danger' },
+    {
+      title: 'Faturamento do mes',
+      value: formatMoney(monthFinance.receita),
+      trend: `${monthFinance.pendReceber} pendentes`,
+      tone: 'success',
+      id: 'receita',
+    },
+    {
+      title: 'Custos do mes',
+      value: formatMoney(monthFinance.custos),
+      trend: `${monthFinance.pendPagar} pendentes`,
+      tone: 'danger',
+      id: 'custos',
+    },
+    {
+      title: 'Saldo do mes',
+      value: formatMoney(monthFinance.receita - monthFinance.custos),
+      trend: 'Mes atual',
+      tone: monthFinance.receita - monthFinance.custos >= 0 ? 'success' : 'danger',
+      id: 'saldo',
+    },
+    {
+      title: 'Fluxo prox. 7 dias',
+      value: formatMoney(summary.receberSemana - summary.pagarSemana),
+      trend: `${formatMoney(summary.receberSemana)} in / ${formatMoney(summary.pagarSemana)} out`,
+      tone: 'neutral',
+      id: 'fluxo',
+    },
   ]
+
+  const proximosFinanceiro = useMemo(() => {
+    const today = new Date()
+    const limit = new Date()
+    limit.setDate(today.getDate() + 7)
+    return entries
+      .filter((e) => {
+        const d = new Date(e.data)
+        return !Number.isNaN(d.getTime()) && d >= today && d <= limit
+      })
+      .sort((a, b) => a.data.localeCompare(b.data))
+  }, [entries])
+
+  const dailyNet = useMemo(() => {
+    const today = new Date()
+    const month = today.getMonth()
+    const year = today.getFullYear()
+    const daysInMonth = new Date(year, month + 1, 0).getDate()
+    const base = Array.from({ length: daysInMonth }, (_, idx) => ({
+      dia: String(idx + 1).padStart(2, '0'),
+      valor: 0,
+    }))
+    const monthEntries = entries.filter((e) => {
+      const d = new Date(e.data)
+      return !Number.isNaN(d.getTime()) && d.getMonth() === month && d.getFullYear() === year
+    })
+    monthEntries.forEach((e) => {
+      const d = new Date(e.data)
+      const dayIdx = d.getDate() - 1
+      const delta = e.tipo === 'recebimento' ? e.valor : e.tipo === 'pagamento' ? -e.valor : 0
+      base[dayIdx].valor += delta
+    })
+    return base
+  }, [entries])
+
+  const onboarding = useMemo(() => {
+    const clientes = readCount('erp.contatos')
+    const produtosCount = readCount('erp.produtos')
+    const vendasCount = readCount('erp.sales')
+    const comprasCount = readCount('erp.compras')
+    const financeiros = entries.length
+    const configGeral = Boolean(localStorage.getItem('erp.config.geral'))
+    const steps: OnboardingStep[] = [
+      {
+        id: 'config',
+        label: 'Configurar dados da empresa',
+        done: configGeral,
+        detail: configGeral ? 'Cadastro da empresa preenchido' : 'Falta preencher Configuracoes > Geral',
+      },
+      {
+        id: 'contatos',
+        label: 'Cadastrar clientes/fornecedores',
+        done: clientes > 0,
+        detail: clientes > 0 ? `${clientes} contatos cadastrados` : 'Falta cadastrar contatos',
+      },
+      {
+        id: 'produtos',
+        label: 'Cadastrar produtos/servicos',
+        done: produtosCount > 0,
+        detail: produtosCount > 0 ? `${produtosCount} itens no catalogo` : 'Falta cadastrar produtos/servicos',
+      },
+      {
+        id: 'movimentos',
+        label: 'Registrar vendas ou compras',
+        done: vendasCount + comprasCount > 0,
+        detail:
+          vendasCount + comprasCount > 0
+            ? `${vendasCount} vendas, ${comprasCount} compras`
+            : 'Falta registrar uma venda ou compra',
+      },
+      {
+        id: 'financeiro',
+        label: 'Lancar financeiro',
+        done: financeiros > 0,
+        detail: financeiros > 0 ? `${financeiros} lancamentos` : 'Falta lancar recebimentos/pagamentos',
+      },
+    ]
+    const percent = (steps.filter((s) => s.done).length / steps.length) * 100
+    return { steps, percent }
+  }, [entries])
+
+  const alerts: DashboardAlert[] = useMemo(() => {
+    const list: DashboardAlert[] = []
+    const pendReceber = entries.filter((e) => e.tipo === 'recebimento' && e.situacao !== 'Recebido').length
+    const pendPagar = entries.filter((e) => e.tipo === 'pagamento' && e.situacao !== 'Pago').length
+    if (pendReceber > 0) list.push({ id: 'receber', text: `${pendReceber} recebimentos pendentes`, tone: 'warn' })
+    if (pendPagar > 0) list.push({ id: 'pagar', text: `${pendPagar} pagamentos pendentes`, tone: 'warn' })
+    if (entries.length === 0) {
+      list.push({ id: 'finance-zero', text: 'Nenhum lancamento financeiro registrado', tone: 'info' })
+    }
+    return list
+  }, [entries])
+
+  const loadArray = <T,>(key: string, fallback: T[]) => {
+    try {
+      const raw = localStorage.getItem(key)
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (Array.isArray(parsed)) return parsed as T[]
+      }
+    } catch {
+      return fallback
+    }
+    return fallback
+  }
+
+  const pieDataDynamic: PieEntry[] = useMemo(() => {
+    const today = new Date()
+    const month = today.getMonth()
+    const year = today.getFullYear()
+    const vendasStorage = loadArray<SaleRecord>('erp.sales', [])
+    const produtosStorage = loadArray<ProductItem>('erp.produtos', produtosSeed)
+
+    const vendasMes = vendasStorage.filter((v) => {
+      const d = new Date(v.data)
+      return !Number.isNaN(d.getTime()) && d.getMonth() === month && d.getFullYear() === year && (v.registro || 'vendas') === 'vendas'
+    })
+
+    const map = new Map<string, number>()
+    vendasMes.forEach((v) => {
+      v.itens.forEach((item) => {
+        const prod = produtosStorage.find((p) => p.id === item.produtoId)
+        const cat = prod?.categoria || 'Outros'
+        const valor = item.quantidade * item.valor
+        map.set(cat, (map.get(cat) || 0) + valor)
+      })
+    })
+
+    const entriesPie = Array.from(map.entries()).map(([name, value]) => ({ name, value }))
+    return entriesPie.length > 0 ? entriesPie : [{ name: 'Sem vendas no mes', value: 1 }]
+  }, [])
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900">
       <header className="h-16 bg-[#0f3047] text-white flex items-center px-6 gap-4 shadow-md">
-        <div className="font-bold tracking-tight text-lg">ERP Nimbus</div>
+        <div className="font-bold tracking-tight text-lg">ERP Wolkan</div>
         <div className="flex-1 max-w-2xl">
           <input
             className="w-full rounded-lg bg-white/10 border border-white/20 px-3 py-2 text-sm placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-amber-400"
@@ -224,17 +479,81 @@ export default function App() {
               </button>
             ))}
           </nav>
-          <div className="bg-white/5 rounded-md p-3 text-sm">
-            <div className="font-semibold">Assine agora</div>
-            <p className="text-slate-300 text-xs mt-1">Liberte limites de usuarios e modulos.</p>
-            <button className="mt-3 w-full bg-amber-400 text-slate-900 font-semibold py-2 rounded-md">
-              Ver planos
-            </button>
-          </div>
         </aside>
 
         <main className="p-6 space-y-6">
-          {activePage === 'Dashboard' && <DashboardPage kpis={kpis} />}
+          {activePage === 'Dashboard' && (
+            <DashboardPage
+              kpis={kpis}
+              resultado={{
+                receita: monthFinance.receita,
+                custos: monthFinance.custos,
+                saldo: monthFinance.receita - monthFinance.custos,
+                pendReceber: monthFinance.pendReceber,
+                pendPagar: monthFinance.pendPagar,
+              }}
+              proximosFinanceiro={proximosFinanceiro}
+              pieData={pieDataDynamic}
+              onVerFinanceiro={() => {
+                setActivePage('Financeiro')
+                setFinanceTab('recebimentos')
+              }}
+              onKpiClick={(id) => {
+                setActivePage('Financeiro')
+                if (id === 'custos') {
+                  setFinanceTab('pagamentos')
+                } else {
+                  setFinanceTab('recebimentos')
+                }
+              }}
+              onShortcut={(label) => {
+                const lower = label.toLowerCase()
+                if (lower.includes('venda')) {
+                  setActivePage('Vendas')
+                  setSalesTab('vendas')
+                  setShortcutNewSale((n) => n + 1)
+                } else if (lower.includes('compra')) {
+                  setActivePage('Compras')
+                  setShortcutNewPurchase((n) => n + 1)
+                } else if (lower.includes('cliente')) {
+                  setActivePage('Clientes')
+                  setContactTab('clientes')
+                  setShortcutNewContact((n) => n + 1)
+                } else if (lower.includes('produto')) {
+                  setActivePage('Produtos')
+                  setProductTab('produtos')
+                  setShortcutNewProduct((n) => n + 1)
+                } else if (lower.includes('conta')) {
+                  setActivePage('Configuracoes')
+                  setConfigTab('caixa')
+                }
+              }}
+              onboarding={onboarding}
+              onGoConfig={() => {
+                setActivePage('Configuracoes')
+                setConfigTab('geral')
+              }}
+              onOnboardingClick={(id) => {
+                if (id === 'config') {
+                  setActivePage('Configuracoes')
+                  setConfigTab('geral')
+                } else if (id === 'contatos') {
+                  setActivePage('Clientes')
+                } else if (id === 'produtos') {
+                  setActivePage('Produtos')
+                  setProductTab('produtos')
+                } else if (id === 'movimentos') {
+                  setActivePage('Vendas')
+                } else if (id === 'financeiro') {
+                  setActivePage('Financeiro')
+                  setFinanceTab('recebimentos')
+                }
+              }}
+              alerts={alerts}
+              dailyNet={dailyNet}
+              formatMoney={formatMoney}
+            />
+          )}
           {activePage === 'Financeiro' && (
             <FinanceiroPage
               activeTab={financeTab}
@@ -245,10 +564,34 @@ export default function App() {
               formatMoney={formatMoney}
             />
           )}
-          {activePage === 'Vendas' && <VendasPage activeTab={salesTab} setActiveTab={setSalesTab} />}
-          {activePage === 'Compras' && <ComprasPage activeTab={purchaseTab} setActiveTab={setPurchaseTab} />}
-          {activePage === 'Clientes' && <ClientesPage activeTab={contactTab} setActiveTab={setContactTab} />}
-          {activePage === 'Produtos' && <ProdutosPage activeTab={productTab} setActiveTab={setProductTab} />}
+          {activePage === 'Vendas' && (
+            <VendasPage
+              activeTab={salesTab}
+              setActiveTab={setSalesTab}
+              onFinanceUpsertSale={upsertFinanceFromSale}
+              openNewSignal={shortcutNewSale}
+            />
+          )}
+          {activePage === 'Compras' && (
+            <ComprasPageNovo
+              activeTab={purchaseTab}
+              onFinanceUpsertPurchase={upsertFinanceFromPurchase}
+              onFinanceRemovePurchases={(ids) => {
+                ids.forEach((id) => {
+                  const ref = financeRefPurchase(id)
+                  const entry = entries.find((e) => e.referente === ref)
+                  if (entry) removeEntry(entry.id)
+                })
+              }}
+              openNewSignal={shortcutNewPurchase}
+            />
+          )}
+          {activePage === 'Clientes' && (
+            <ClientesPage activeTab={contactTab} setActiveTab={setContactTab} openNewSignal={shortcutNewContact} />
+          )}
+          {activePage === 'Produtos' && (
+            <ProdutosPage activeTab={productTab} setActiveTab={setProductTab} openNewSignal={shortcutNewProduct} />
+          )}
           {activePage === 'Relatorios' && <RelatoriosPage />}
           {activePage === 'Configuracoes' && <ConfiguracoesPage activeTab={configTab} setActiveTab={setConfigTab} />}
         </main>
@@ -257,14 +600,44 @@ export default function App() {
   )
 }
 
-type Kpi = { title: string; value: string; trend: string; tone: 'success' | 'danger' | 'neutral' }
+type Kpi = { id: 'receita' | 'custos' | 'saldo' | 'fluxo'; title: string; value: string; trend: string; tone: 'success' | 'danger' | 'neutral' }
 
-function DashboardPage({ kpis }: { kpis: Kpi[] }) {
+type DashboardProps = {
+  kpis: Kpi[]
+  resultado: { receita: number; custos: number; saldo: number; pendReceber: number; pendPagar: number }
+  proximosFinanceiro: FinanceEntry[]
+  pieData: PieEntry[]
+  onVerFinanceiro: () => void
+  onKpiClick: (id: Kpi['id']) => void
+  onShortcut: (label: string) => void
+  onboarding: { steps: OnboardingStep[]; percent: number }
+  onGoConfig: () => void
+  onOnboardingClick: (id: OnboardingStep['id']) => void
+  alerts: DashboardAlert[]
+  dailyNet: { dia: string; valor: number }[]
+  formatMoney: (n: number) => string
+}
+
+function DashboardPage({
+  kpis,
+  resultado,
+  proximosFinanceiro,
+  pieData,
+  onVerFinanceiro,
+  onKpiClick,
+  onShortcut,
+  onboarding,
+  onGoConfig,
+  onOnboardingClick,
+  alerts,
+  dailyNet,
+  formatMoney,
+}: DashboardProps) {
   return (
-    <>
+    <div className="space-y-6">
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {kpis.map((kpi) => (
-          <div key={kpi.title} className="bg-white rounded-xl p-4 shadow-sm border border-slate-200">
+          <div key={kpi.id} className="bg-white rounded-xl p-4 shadow-sm border border-slate-200">
             <div className="flex items-center justify-between text-sm text-slate-500">
               <span>{kpi.title}</span>
               <span
@@ -280,41 +653,79 @@ function DashboardPage({ kpis }: { kpis: Kpi[] }) {
               </span>
             </div>
             <div className="text-2xl font-semibold mt-2">{kpi.value}</div>
-            <button className="mt-3 text-sm text-[#0f3047] font-semibold hover:underline">Ver detalhes</button>
+            <button
+              className="mt-3 text-sm text-[#0f3047] font-semibold hover:underline"
+              onClick={() => onKpiClick(kpi.id)}
+            >
+              Ver detalhes
+            </button>
           </div>
         ))}
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-12">
-        <div className="xl:col-span-8 bg-white rounded-xl p-4 shadow-sm border border-slate-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-lg font-semibold text-[#0f3047]">Onboarding</h2>
-              <p className="text-sm text-slate-500">Complete os passos para usar todo o ERP.</p>
-            </div>
-            <div className="text-sm text-slate-500">40% completo</div>
+      {onboarding.percent < 100 && (
+        <section className="grid gap-4 xl:grid-cols-12">
+          <div className="xl:col-span-8 bg-white rounded-xl p-4 shadow-sm border border-slate-200">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-[#0f3047]">Onboarding</h2>
+                <p className="text-sm text-slate-500">Complete os passos para usar todo o ERP.</p>
+              </div>
+            <div className="text-sm text-slate-500">{Math.round(onboarding.percent)}% completo</div>
           </div>
           <div className="w-full bg-slate-100 h-2 rounded-full mt-3">
-            <div className="h-2 bg-amber-400 rounded-full w-2/5" />
+            <div
+              className="h-2 bg-amber-400 rounded-full transition-all"
+              style={{ width: `${onboarding.percent}%` }}
+            />
           </div>
-          <div className="mt-4 grid sm:grid-cols-2 gap-3 text-sm">
-            {['Cadastre sua empresa', 'Configure formas de pagamento', 'Importe clientes', 'Configure NFe'].map(
-              (step, i) => (
-                <label key={step} className="flex items-center gap-2">
-                  <input type="checkbox" className="h-4 w-4 accent-amber-500" defaultChecked={i === 0} />
-                  <span className="text-slate-700">{step}</span>
-                </label>
-              )
-            )}
-          </div>
-        </div>
 
-        <div className="xl:col-span-4 bg-white rounded-xl p-4 shadow-sm border border-slate-200">
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="text-lg font-semibold text-[#0f3047]">Vendas por categoria</h2>
-            <span className="text-sm text-slate-500">Ultimos 30 dias</span>
+            <div className="mt-4 grid md:grid-cols-2 gap-3 text-sm">
+              {onboarding.steps.map((step) => (
+                <div
+                  key={step.label}
+                  className={`flex items-start justify-between gap-3 rounded-lg border px-4 py-3 ${
+                  step.done ? 'border-green-200 bg-green-50' : 'border-slate-200 bg-slate-50'
+                }`}
+              >
+                <div className="flex flex-col">
+                  <span className="text-slate-800 font-semibold">{step.label}</span>
+                  <span className="text-slate-500 text-xs">{step.detail}</span>
+                </div>
+                <div className="flex items-center">
+                  {step.done ? (
+                    <span className="text-xs font-semibold text-green-700 px-3 py-1 rounded-full bg-green-50 border border-green-200">
+                      Concluido
+                    </span>
+                  ) : (
+                    <button
+                      className="text-xs font-semibold text-amber-700 px-3 py-1 rounded-full border border-amber-200 bg-amber-50 hover:bg-amber-100 transition"
+                      onClick={() => onOnboardingClick(step.id)}
+                    >
+                      Pendente
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
-          <div className="h-56">
+
+          <div className="mt-4 flex flex-col md:flex-row md:items-start md:justify-end gap-3 text-sm">
+            <button
+              className="inline-flex items-center gap-2 text-sm font-semibold text-[#0f3047] hover:underline md:self-start"
+              onClick={onGoConfig}
+            >
+              Ir para Configuracoes
+            </button>
+          </div>
+          </div>
+
+          <div className="xl:col-span-4 bg-white rounded-xl p-4 shadow-sm border border-slate-200">
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-lg font-semibold text-[#0f3047]">Vendas por categoria</h2>
+              <span className="text-sm text-slate-500">Mes atual</span>
+            </div>
+            <div className="h-56">
             <ResponsiveContainer>
               <PieChart>
                 <Pie data={pieData} innerRadius={45} outerRadius={70} paddingAngle={2} dataKey="value">
@@ -330,67 +741,131 @@ function DashboardPage({ kpis }: { kpis: Kpi[] }) {
               <span
                 key={d.name}
                 className="px-2 py-1 rounded-full text-xs font-semibold text-slate-700"
-                style={{ backgroundColor: `${pieColors[i]}22`, color: pieColors[i] }}
+                style={{ backgroundColor: `${pieColors[i % pieColors.length]}22`, color: pieColors[i % pieColors.length] }}
               >
                 {d.name}
               </span>
             ))}
           </div>
-        </div>
-      </section>
+          </div>
+        </section>
+      )}
 
       <section className="grid gap-4 xl:grid-cols-12">
         <div className="xl:col-span-8 bg-white rounded-xl p-4 shadow-sm border border-slate-200">
-          <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center justify-between mb-3">
             <h2 className="text-lg font-semibold text-[#0f3047]">Avisos</h2>
-            <div className="flex gap-2">
-              {['Todos', 'Pendentes', 'Hoje'].map((f, i) => (
-                <button
-                  key={f}
-                  className={`text-xs px-3 py-1 rounded-full border ${
-                    i === 0 ? 'bg-amber-100 border-amber-300 text-[#0f3047]' : 'border-slate-200 text-slate-600'
-                  }`}
-                >
-                  {f}
-                </button>
-              ))}
-            </div>
+            <span className="text-xs text-slate-500">{alerts.length === 0 ? 'Tudo certo' : `${alerts.length} pendente(s)`}</span>
           </div>
           <div className="space-y-3">
+            {alerts.length === 0 && (
+              <div className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                Nenhum aviso no momento.
+              </div>
+            )}
             {alerts.map((alert) => (
               <div
-                key={alert.text}
-                className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 bg-slate-50"
+                key={alert.id}
+                className={`flex items-center justify-between rounded-lg border px-3 py-2 ${
+                  alert.tone === 'warn'
+                    ? 'border-amber-200 bg-amber-50 text-amber-800'
+                    : 'border-slate-200 bg-slate-50 text-slate-700'
+                }`}
               >
-                <div className="flex items-center gap-3">
-                  <span className="text-sm font-semibold text-[#0f3047] uppercase">{alert.icon}</span>
-                  <span className="text-sm text-slate-700">{alert.text}</span>
-                </div>
-                <button className="text-sm font-semibold text-[#0f3047] hover:underline">{alert.link}</button>
+                <span className="text-sm">{alert.text}</span>
+                <button
+                  className="text-xs font-semibold text-[#0f3047] hover:underline"
+                  onClick={onVerFinanceiro}
+                  title="Ir para o Financeiro"
+                >
+                  Ver finance
+                </button>
               </div>
             ))}
           </div>
         </div>
 
-        <div className="xl:col-span-4 bg-white rounded-xl p-4 shadow-sm border border-slate-200">
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="text-lg font-semibold text-[#0f3047]">Resultado consolidado</h2>
-            <span className="text-sm text-slate-500">Novembro 2025</span>
+        <div className="xl:col-span-4 bg-white rounded-xl p-4 shadow-sm border border-slate-200 space-y-3">
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="text-lg font-semibold text-[#0f3047]">Resultado do mes</h2>
+            <span className="text-xs text-slate-500">Mes atual</span>
           </div>
-          <div className="space-y-2">
-            {metrics.map((m) => (
-              <div key={m.label} className="flex items-center justify-between text-sm">
-                <span className="text-slate-600">{m.label}</span>
-                <span
-                  className={`font-semibold ${
-                    m.tone === 'positive'
-                      ? 'text-green-600'
-                      : m.tone === 'negative'
-                      ? 'text-red-600'
-                      : 'text-slate-700'
-                  }`}
-                >
-                  {m.value}
+          <div className="space-y-2 text-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-slate-600">Receita bruta</span>
+              <span className="font-semibold text-green-700">{formatMoney(resultado.receita)}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-600">Custos</span>
+              <span className="font-semibold text-red-700">- {formatMoney(resultado.custos)}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-600">Saldo</span>
+              <span className={`font-semibold ${resultado.saldo >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                {formatMoney(resultado.saldo)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-600">Pend. receber</span>
+              <span className="font-semibold text-amber-700">{resultado.pendReceber}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-600">Pend. pagar</span>
+              <span className="font-semibold text-amber-700">{resultado.pendPagar}</span>
+            </div>
+            <button
+              className="mt-2 w-full text-sm font-semibold text-[#0f3047] hover:underline text-left"
+              onClick={onVerFinanceiro}
+            >
+              Ver Financeiro
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-12">
+        <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-200 xl:col-span-8">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-semibold text-[#0f3047]">Fluxo diario</h2>
+            <span className="text-xs text-slate-500">Mes atual</span>
+          </div>
+          <div className="h-56">
+            <ResponsiveContainer>
+              <LineChart data={dailyNet}>
+                <XAxis dataKey="dia" tick={{ fontSize: 12 }} />
+                <Tooltip formatter={(v: number) => formatMoney(v)} />
+                <Line type="monotone" dataKey="valor" stroke="#0f3047" strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-200 xl:col-span-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-semibold text-[#0f3047]">Proximos 7 dias</h2>
+            <span className="text-xs text-slate-500">
+              {proximosFinanceiro.length === 0 ? 'Sem vencimentos' : `${proximosFinanceiro.length} itens`}
+            </span>
+          </div>
+          <div className="space-y-2 text-sm">
+            {proximosFinanceiro.length === 0 && (
+              <div className="text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                Nenhum vencimento nos proximos 7 dias.
+              </div>
+            )}
+            {proximosFinanceiro.map((p) => (
+              <div
+                key={p.id}
+                className="flex items-center justify-between border border-slate-200 rounded-lg px-3 py-2 bg-slate-50"
+              >
+                <div className="flex flex-col">
+                  <span className="font-semibold text-slate-800">{p.descricao}</span>
+                  <span className="text-xs text-slate-500">
+                    {p.data} · {p.tipo === 'recebimento' ? 'Receber' : 'Pagar'}
+                  </span>
+                </div>
+                <span className={p.tipo === 'recebimento' ? 'text-green-700 font-semibold' : 'text-red-700 font-semibold'}>
+                  {formatMoney(p.valor)}
                 </span>
               </div>
             ))}
@@ -406,6 +881,7 @@ function DashboardPage({ kpis }: { kpis: Kpi[] }) {
               <button
                 key={item}
                 className="border border-slate-200 rounded-lg px-3 py-2 text-sm text-[#0f3047] font-semibold hover:border-amber-300 hover:bg-amber-50 text-left transition"
+                onClick={() => onShortcut(item)}
               >
                 {item}
               </button>
@@ -415,10 +891,24 @@ function DashboardPage({ kpis }: { kpis: Kpi[] }) {
 
         <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-200">
           <h2 className="text-lg font-semibold text-[#0f3047] mb-3">Proximos vencimentos</h2>
-          <div className="text-sm text-slate-500">Nenhum vencimento nos proximos 7 dias.</div>
+          <div className="text-sm text-slate-600">
+            {proximosFinanceiro.length === 0 ? 'Nenhum vencimento nos proximos 7 dias.' : ''}
+          </div>
+          <div className="space-y-2 mt-2 text-sm">
+            {proximosFinanceiro.slice(0, 3).map((p) => (
+              <div key={p.id} className="flex items-center justify-between">
+                <span className="text-slate-700">
+                  {p.descricao} · {p.data}
+                </span>
+                <span className={p.tipo === 'recebimento' ? 'text-green-700 font-semibold' : 'text-red-700 font-semibold'}>
+                  {formatMoney(p.valor)}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
-    </>
+    </div>
   )
 }
 
@@ -455,15 +945,6 @@ function FinanceiroPage({
     vias: '1 via',
     quemEmite: 'Empresa',
   })
-
-  useEffect(() => {
-    setViewMode('list')
-    setFinanceSearch('')
-    setFinanceMonth(() => {
-      const now = new Date()
-      return new Date(now.getFullYear(), now.getMonth(), 1)
-    })
-  }, [activeTab])
 
   const headerPalette: Record<FinanceTab, string> = {
     recebimentos: 'bg-green-600 text-white',
@@ -892,7 +1373,29 @@ function FinanceiroPage({
   )
 }
 
-function VendasPage({ activeTab, setActiveTab }: { activeTab: SalesTab; setActiveTab: (t: SalesTab) => void }) {
+type SaleItem = { produtoId: string; quantidade: number; valor: number }
+type SaleRecord = {
+  id: string
+  cliente: string
+  vendedor: string
+  data: string
+  tipo: string
+  registro?: SalesTab
+  itens: SaleItem[]
+  total: number
+}
+
+function VendasPage({
+  activeTab,
+  setActiveTab,
+  onFinanceUpsertSale,
+  openNewSignal,
+}: {
+  activeTab: SalesTab
+  setActiveTab: (t: SalesTab) => void
+  onFinanceUpsertSale: (sale: SaleRecord) => void
+  openNewSignal: number
+}) {
   const [salesSearch, setSalesSearch] = useState('')
   const [salesMonth, setSalesMonth] = useState(() => {
     const now = new Date()
@@ -902,17 +1405,22 @@ function VendasPage({ activeTab, setActiveTab }: { activeTab: SalesTab; setActiv
   const [salesToast, setSalesToast] = useState<string | null>(null)
   const [salesModalOpen, setSalesModalOpen] = useState(false)
   const [salesModalMode, setSalesModalMode] = useState<'new' | 'edit'>('new')
-  const salesDefaultForm = {
-    cliente: '',
-    vendedor: '',
-    data: new Date().toISOString().slice(0, 10),
-    tipo: 'Venda',
-    total: 0,
-  }
-  const [salesForm, setSalesForm] = useState(salesDefaultForm)
+  const buildSalesDefaultForm = useCallback(
+    () => ({
+      cliente: '',
+      vendedor: '',
+      data: new Date().toISOString().slice(0, 10),
+      tipo: activeTab === 'devolucoes' ? 'Devolucao' : 'Venda',
+      itens: [{ produtoId: '', quantidade: 1, valor: 0 }],
+      total: 0,
+    }),
+    [activeTab],
+  )
+
+  const [salesForm, setSalesForm] = useState(buildSalesDefaultForm)
   const [salesEditId, setSalesEditId] = useState<string | null>(null)
 
-  const { items: salesItems, add: addSale, update: updateSale, remove: removeSale } = useLocalCrud('erp.sales', [
+  const { items: salesItems, add: addSale, update: updateSale, remove: removeSale } = useLocalCrud<SaleRecord>('erp.sales', [
     {
       id: 'V001',
       cliente: 'Loja Centro',
@@ -921,6 +1429,7 @@ function VendasPage({ activeTab, setActiveTab }: { activeTab: SalesTab; setActiv
       tipo: 'Venda',
       total: 1520.5,
       registro: 'vendas' as SalesTab,
+      itens: [{ produtoId: 'P001', quantidade: 1, valor: 1520.5 }],
     },
     {
       id: 'V002',
@@ -930,6 +1439,7 @@ function VendasPage({ activeTab, setActiveTab }: { activeTab: SalesTab; setActiv
       tipo: 'Venda',
       total: 820.0,
       registro: 'vendas' as SalesTab,
+      itens: [{ produtoId: 'P002', quantidade: 2, valor: 410 }],
     },
     {
       id: 'D001',
@@ -939,8 +1449,11 @@ function VendasPage({ activeTab, setActiveTab }: { activeTab: SalesTab; setActiv
       tipo: 'Devolucao',
       total: 210.0,
       registro: 'devolucoes' as SalesTab,
+      itens: [{ produtoId: 'P002', quantidade: 1, valor: 210 }],
     },
   ])
+
+  const { items: produtosStock, setItems: setProdutosStock } = useLocalCrud<ProductItem>('erp.produtos', produtosSeed)
 
   const salesTerm = salesSearch.trim().toLowerCase()
 
@@ -955,6 +1468,34 @@ function VendasPage({ activeTab, setActiveTab }: { activeTab: SalesTab; setActiv
     return hay.includes(salesTerm)
   })
 
+  const buildStockDelta = (itens: SaleItem[], registro: SalesTab) => {
+    const delta: Record<string, number> = {}
+    itens.forEach((item) => {
+      const mult = registro === 'devolucoes' ? 1 : -1
+      delta[item.produtoId] = (delta[item.produtoId] || 0) + mult * (item.quantidade || 0)
+    })
+    return delta
+  }
+
+  const canApplyStock = (delta: Record<string, number>) => {
+    return Object.entries(delta).every(([id, change]) => {
+      const prod = produtosStock.find((p) => p.id === id)
+      if (!prod || prod.tipo !== 'produtos') return true
+      const novoEstoque = (prod.estoque || 0) + change
+      return novoEstoque >= 0
+    })
+  }
+
+  const applyStock = (delta: Record<string, number>) => {
+    setProdutosStock((prev) =>
+      prev.map((p) => {
+        const diff = delta[p.id] || 0
+        if (diff === 0) return p
+        return { ...p, estoque: (p.estoque || 0) + diff }
+      }),
+    )
+  }
+
   const toggleSales = (id: string) => {
     setSalesSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
   }
@@ -966,18 +1507,20 @@ function VendasPage({ activeTab, setActiveTab }: { activeTab: SalesTab; setActiv
     setSalesSelected(all ? [] : ids)
   }
 
-  const handleSalesNew = () => {
+  const handleSalesNew = useCallback(() => {
     setSalesModalMode('new')
     setSalesEditId(null)
-    setSalesForm({
-      cliente: '',
-      vendedor: '',
-      data: new Date().toISOString().slice(0, 10),
-      tipo: activeTab === 'devolucoes' ? 'Devolucao' : 'Venda',
-      total: 0,
-    })
+    setSalesForm(buildSalesDefaultForm())
     setSalesModalOpen(true)
-  }
+  }, [buildSalesDefaultForm])
+
+  const salesNewRef = useRef(0)
+  useEffect(() => {
+    if (openNewSignal > salesNewRef.current) {
+      salesNewRef.current = openNewSignal
+      setTimeout(() => handleSalesNew(), 0)
+    }
+  }, [openNewSignal, handleSalesNew])
 
   const handleSalesEdit = () => {
     if (salesSelected.length !== 1) {
@@ -993,6 +1536,12 @@ function VendasPage({ activeTab, setActiveTab }: { activeTab: SalesTab; setActiv
       vendedor: current.vendedor,
       data: current.data,
       tipo: current.tipo,
+      itens:
+        current.itens?.map((i: SaleItem) => ({
+          produtoId: i.produtoId || '',
+          quantidade: i.quantidade || 1,
+          valor: i.valor || 0,
+        })) || [{ produtoId: '', quantidade: 1, valor: 0 }],
       total: current.total,
     })
     setSalesModalOpen(true)
@@ -1003,11 +1552,29 @@ function VendasPage({ activeTab, setActiveTab }: { activeTab: SalesTab; setActiv
       setSalesToast('Selecione ao menos um registro para duplicar.')
       return
     }
+    const deltas: Record<string, number>[] = []
+    const payloads: SaleRecord[] = []
     salesSelected.forEach((id) => {
       const current = salesItems.find((s) => s.id === id)
       if (current) {
-        addSale({ ...current, id: crypto.randomUUID() })
+        deltas.push(buildStockDelta(current.itens || [], current.registro || activeTab))
+        payloads.push({ ...current, id: crypto.randomUUID() })
       }
+    })
+    const totalDelta = deltas.reduce((acc, d) => {
+      Object.entries(d).forEach(([k, v]) => {
+        acc[k] = (acc[k] || 0) + v
+      })
+      return acc
+    }, {} as Record<string, number>)
+    if (!canApplyStock(totalDelta)) {
+      setSalesToast('Estoque insuficiente para duplicar um dos registros.')
+      return
+    }
+    applyStock(totalDelta)
+    payloads.forEach((p) => {
+      addSale(p)
+      onFinanceUpsertSale(p)
     })
   }
 
@@ -1016,6 +1583,23 @@ function VendasPage({ activeTab, setActiveTab }: { activeTab: SalesTab; setActiv
       setSalesToast('Selecione ao menos um registro para excluir.')
       return
     }
+    const restoreDelta = salesItems
+      .filter((s) => salesSelected.includes(s.id))
+      .map((s) => {
+        const d = buildStockDelta(s.itens || [], s.registro || activeTab)
+        const invert: Record<string, number> = {}
+        Object.entries(d).forEach(([k, v]) => {
+          invert[k] = -(v || 0)
+        })
+        return invert
+      })
+      .reduce((acc, d) => {
+        Object.entries(d).forEach(([k, v]) => {
+          acc[k] = (acc[k] || 0) + v
+        })
+        return acc
+      }, {} as Record<string, number>)
+    applyStock(restoreDelta)
     removeSale(salesSelected)
     setSalesSelected([])
   }
@@ -1086,19 +1670,98 @@ function VendasPage({ activeTab, setActiveTab }: { activeTab: SalesTab; setActiv
               </select>
             </div>
           </div>
-          <div className="space-y-1">
-            <label className="text-xs text-slate-500">Total</label>
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-slate-500">R$</span>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                inputMode="decimal"
-                className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
-                value={salesForm.total}
-                onChange={(e) => setSalesForm((p) => ({ ...p, total: parseFloat(e.target.value || '0') }))}
-              />
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-semibold text-slate-700">Itens</h4>
+              <button
+                className="text-xs text-emerald-600 font-semibold"
+                onClick={() =>
+                  setSalesForm((p) => ({
+                    ...p,
+                    itens: [...(p.itens || []), { produtoId: '', quantidade: 1, valor: 0 }],
+                  }))
+                }
+              >
+                + Adicionar item
+              </button>
+            </div>
+            <div className="space-y-3">
+              {(salesForm.itens || []).map((item, idx) => (
+                <div key={idx} className="grid grid-cols-6 gap-2 items-end border border-slate-200 rounded-md p-2">
+                  <div className="col-span-3 space-y-1">
+                    <label className="text-xs text-slate-500">Produto</label>
+                    <input
+                      className="w-full border border-slate-200 rounded-md px-2 py-1 text-sm"
+                      value={item.produtoId}
+                      onChange={(e) =>
+                        setSalesForm((p) => {
+                          const itens = [...(p.itens || [])]
+                          itens[idx] = { ...itens[idx], produtoId: e.target.value }
+                          return { ...p, itens }
+                        })
+                      }
+                      placeholder="Cod ou nome"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs text-slate-500">Qtd</label>
+                    <input
+                      type="number"
+                      min="1"
+                      className="w-full border border-slate-200 rounded-md px-2 py-1 text-sm"
+                      value={item.quantidade}
+                      onChange={(e) =>
+                        setSalesForm((p) => {
+                          const itens = [...(p.itens || [])]
+                          itens[idx] = { ...itens[idx], quantidade: parseInt(e.target.value || '0') }
+                          return { ...p, itens }
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs text-slate-500">Valor unitario</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      className="w-full border border-slate-200 rounded-md px-2 py-1 text-sm"
+                      value={item.valor}
+                      onChange={(e) =>
+                        setSalesForm((p) => {
+                          const itens = [...(p.itens || [])]
+                          itens[idx] = { ...itens[idx], valor: parseFloat(e.target.value || '0') }
+                          return { ...p, itens }
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1 text-right">
+                    <span className="text-xs text-slate-500 block">Subtotal</span>
+                    <span className="text-sm font-semibold text-slate-700">
+                      {formatMoney((item.quantidade || 0) * (item.valor || 0))}
+                    </span>
+                  </div>
+                  <div className="col-span-6 flex justify-end">
+                    <button
+                      className="text-xs text-red-600 hover:underline"
+                      onClick={() =>
+                        setSalesForm((p) => ({
+                          ...p,
+                          itens: (p.itens || []).filter((_, i) => i !== idx),
+                        }))
+                      }
+                      disabled={(salesForm.itens || []).length === 1}
+                    >
+                      Remover
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center justify-between pt-2 border-t border-slate-200 text-sm font-semibold text-slate-700">
+              <span>Total:</span>
+              <span>{formatMoney((salesForm.itens || []).reduce((acc, item) => acc + (item.quantidade || 0) * (item.valor || 0), 0))}</span>
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-2">
@@ -1108,6 +1771,14 @@ function VendasPage({ activeTab, setActiveTab }: { activeTab: SalesTab; setActiv
             <button
               className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-md text-sm font-semibold"
               onClick={() => {
+                const itensLimpos =
+                  salesForm.itens
+                    ?.map((i) => ({
+                      produtoId: i.produtoId || '',
+                      quantidade: Math.max(0, Number(i.quantidade) || 0),
+                      valor: Math.max(0, Number(i.valor) || 0),
+                    }))
+                    .filter((i) => i.produtoId && i.quantidade > 0) || []
                 if (!salesForm.cliente.trim()) {
                   setSalesToast('Cliente obrigatorio')
                   return
@@ -1116,16 +1787,32 @@ function VendasPage({ activeTab, setActiveTab }: { activeTab: SalesTab; setActiv
                   setSalesToast('Data obrigatoria')
                   return
                 }
-                if (Number.isNaN(salesForm.total)) {
-                  setSalesToast('Total invalido')
+                if (itensLimpos.length === 0) {
+                  setSalesToast('Adicione ao menos 1 item')
                   return
                 }
-                const totalNorm = normalizeMoney(salesForm.total)
-                if (salesModalMode === 'new') {
-                  addSale({ ...salesForm, total: totalNorm, registro: activeTab })
-                } else if (salesEditId) {
-                  updateSale(salesEditId, { ...salesForm, total: totalNorm })
+                const totalNorm = normalizeMoney(
+                  itensLimpos.reduce((acc, item) => acc + item.quantidade * item.valor, 0),
+                )
+                const payload: SaleRecord = {
+                  ...salesForm,
+                  itens: itensLimpos,
+                  total: totalNorm,
+                  registro: activeTab,
+                  id: salesEditId || crypto.randomUUID(),
                 }
+                const delta = buildStockDelta(itensLimpos, activeTab)
+                if (!canApplyStock(delta)) {
+                  setSalesToast('Estoque insuficiente para um dos itens.')
+                  return
+                }
+                applyStock(delta)
+                if (salesModalMode === 'new') {
+                  addSale(payload)
+                } else if (salesEditId) {
+                  updateSale(salesEditId, payload)
+                }
+                onFinanceUpsertSale(payload)
                 setSalesForm(salesDefaultForm)
                 setSalesModalOpen(false)
                 setSalesToast('Registro salvo')
@@ -1288,6 +1975,7 @@ function VendasPage({ activeTab, setActiveTab }: { activeTab: SalesTab; setActiv
   )
 }
 
+/* eslint-disable @typescript-eslint/no-unused-vars */
 function ComprasPage({ activeTab, setActiveTab }: { activeTab: PurchaseTab; setActiveTab: (t: PurchaseTab) => void }) {
   const [purchaseSearch, setPurchaseSearch] = useState('')
   const [purchaseMonth, setPurchaseMonth] = useState(() => {
@@ -1403,6 +2091,7 @@ function ComprasPage({ activeTab, setActiveTab }: { activeTab: PurchaseTab; setA
     removeCompra(purchaseSelected)
     setPurchaseSelected([])
   }
+/* eslint-enable @typescript-eslint/no-unused-vars */
 
   const handlePurchaseExport = () => {
     if (filteredPurchases.length === 0) {
@@ -1671,7 +2360,539 @@ function ComprasPage({ activeTab, setActiveTab }: { activeTab: PurchaseTab; setA
   )
 }
 
-function ClientesPage({ activeTab, setActiveTab }: { activeTab: ContactTab; setActiveTab: (t: ContactTab) => void }) {
+function ComprasPageNovo({
+  activeTab,
+  onFinanceUpsertPurchase,
+  onFinanceRemovePurchases,
+  openNewSignal,
+}: {
+  activeTab: PurchaseTab
+  onFinanceUpsertPurchase: (p: PurchaseRecord) => void
+  onFinanceRemovePurchases: (ids: string[]) => void
+  openNewSignal: number
+}) {
+  const [purchaseSearch, setPurchaseSearch] = useState('')
+  const [purchaseMonth, setPurchaseMonth] = useState(() => {
+    const now = new Date()
+    return new Date(now.getFullYear(), now.getMonth(), 1)
+  })
+  const [purchaseSelected, setPurchaseSelected] = useState<string[]>([])
+  const [purchaseToast, setPurchaseToast] = useState<string | null>(null)
+  const [purchaseModalOpen, setPurchaseModalOpen] = useState(false)
+  const [purchaseModalMode, setPurchaseModalMode] = useState<'new' | 'edit'>('new')
+  const buildPurchaseDefaultForm = useCallback(
+    () => ({
+      fornecedor: '',
+      nota: '',
+      data: new Date().toISOString().slice(0, 10),
+      situacao: 'Pendente',
+      itens: [{ produtoId: '', quantidade: 1, valor: 0 }],
+      total: 0,
+    }),
+    [],
+  )
+  const [purchaseForm, setPurchaseForm] = useState(buildPurchaseDefaultForm)
+  const [purchaseEditId, setPurchaseEditId] = useState<string | null>(null)
+
+  const { items: compras, add: addCompra, update: updateCompra, remove: removeCompra } = useLocalCrud<PurchaseRecord>('erp.compras', [
+    {
+      id: 'C001',
+      fornecedor: 'Fornec Uno',
+      nota: 'NF123',
+      data: '2025-11-03',
+      situacao: 'Pendente',
+      total: 350.5,
+      itens: [{ produtoId: 'P002', quantidade: 5, valor: 70 }],
+      registro: 'compras' as PurchaseTab,
+    },
+  ])
+  const { items: produtosStock, setItems: setProdutosStock } = useLocalCrud<ProductItem>('erp.produtos', produtosSeed)
+
+  const purchaseTerm = purchaseSearch.trim().toLowerCase()
+
+  const filteredPurchases = compras.filter((c) => {
+    const d = new Date(c.data)
+    const sameMonth =
+      !isNaN(d.getTime()) && d.getMonth() === purchaseMonth.getMonth() && d.getFullYear() === purchaseMonth.getFullYear()
+    if (!sameMonth) return false
+    if (!purchaseTerm) return true
+    const hay = [c.id, c.fornecedor, c.nota, c.situacao].join(' ').toLowerCase()
+    return hay.includes(purchaseTerm)
+  })
+
+  const buildStockDelta = (itens: PurchaseItem[]) => {
+    const delta: Record<string, number> = {}
+    itens.forEach((item) => {
+      delta[item.produtoId] = (delta[item.produtoId] || 0) + (item.quantidade || 0)
+    })
+    return delta
+  }
+
+  const canApplyStock = (delta: Record<string, number>) => {
+    return Object.entries(delta).every(([id, change]) => {
+      const prod = produtosStock.find((p) => p.id === id)
+      if (!prod || prod.tipo !== 'produtos') return true
+      const novoEstoque = (prod.estoque || 0) + change
+      return novoEstoque >= 0
+    })
+  }
+
+  const applyStock = (delta: Record<string, number>) => {
+    setProdutosStock((prev) =>
+      prev.map((p) => {
+        const diff = delta[p.id] || 0
+        if (diff === 0) return p
+        return { ...p, estoque: (p.estoque || 0) + diff }
+      }),
+    )
+  }
+
+  const togglePurchase = (id: string) => {
+    setPurchaseSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+  }
+
+  const togglePurchaseAll = () => {
+    if (filteredPurchases.length === 0) return
+    const ids = filteredPurchases.map((c) => c.id)
+    const all = ids.every((id) => purchaseSelected.includes(id))
+    setPurchaseSelected(all ? [] : ids)
+  }
+
+  const handlePurchaseNew = useCallback(() => {
+    setPurchaseModalMode('new')
+    setPurchaseEditId(null)
+    setPurchaseForm(buildPurchaseDefaultForm())
+    setPurchaseModalOpen(true)
+  }, [buildPurchaseDefaultForm])
+
+  const purchaseNewRef = useRef(0)
+  useEffect(() => {
+    if (openNewSignal > purchaseNewRef.current) {
+      purchaseNewRef.current = openNewSignal
+      setTimeout(() => handlePurchaseNew(), 0)
+    }
+  }, [openNewSignal, handlePurchaseNew])
+
+  const handlePurchaseEdit = () => {
+    if (purchaseSelected.length !== 1) {
+      setPurchaseToast('Selecione apenas um registro para editar.')
+      return
+    }
+    const current = compras.find((c) => c.id === purchaseSelected[0])
+    if (!current) return
+    setPurchaseModalMode('edit')
+    setPurchaseEditId(current.id)
+    setPurchaseForm({
+      fornecedor: current.fornecedor,
+      nota: current.nota,
+      data: current.data,
+      situacao: current.situacao,
+      itens:
+        current.itens?.map((i: PurchaseItem) => ({
+          produtoId: i.produtoId || '',
+          quantidade: i.quantidade || 1,
+          valor: i.valor || 0,
+        })) || [{ produtoId: '', quantidade: 1, valor: 0 }],
+      total: current.total,
+    })
+    setPurchaseModalOpen(true)
+  }
+
+  const handlePurchaseDuplicate = () => {
+    if (purchaseSelected.length === 0) {
+      setPurchaseToast('Selecione ao menos um registro para duplicar.')
+      return
+    }
+    const payloads: PurchaseRecord[] = []
+    purchaseSelected.forEach((id) => {
+      const current = compras.find((c) => c.id === id)
+      if (current) {
+        payloads.push({ ...current, id: crypto.randomUUID() })
+      }
+    })
+    const totalDelta = payloads
+      .map((p) => buildStockDelta(p.itens || []))
+      .reduce((acc, d) => {
+        Object.entries(d).forEach(([k, v]) => {
+          acc[k] = (acc[k] || 0) + v
+        })
+        return acc
+      }, {} as Record<string, number>)
+    applyStock(totalDelta)
+    payloads.forEach((p) => addCompra(p))
+  }
+
+  const handlePurchaseDelete = () => {
+    if (purchaseSelected.length === 0) {
+      setPurchaseToast('Selecione ao menos um registro para excluir.')
+      return
+    }
+    const deltaRestore = compras
+      .filter((c) => purchaseSelected.includes(c.id))
+      .map((c) => {
+        const d = buildStockDelta(c.itens || [])
+        const invert: Record<string, number> = {}
+        Object.entries(d).forEach(([k, v]) => {
+          invert[k] = -(v || 0)
+        })
+        return invert
+      })
+      .reduce((acc, d) => {
+        Object.entries(d).forEach(([k, v]) => {
+          acc[k] = (acc[k] || 0) + v
+        })
+        return acc
+      }, {} as Record<string, number>)
+    if (!canApplyStock(deltaRestore)) {
+      setPurchaseToast('Estoque insuficiente para remover um dos registros.')
+      return
+    }
+    applyStock(deltaRestore)
+    removeCompra(purchaseSelected)
+    onFinanceRemovePurchases(purchaseSelected)
+    setPurchaseSelected([])
+  }
+
+  const computeTotal = (itens: PurchaseItem[]) =>
+    (itens || []).reduce((acc, item) => acc + (Number(item.quantidade) || 0) * (Number(item.valor) || 0), 0)
+
+  return (
+    <section className="bg-white rounded-xl p-4 shadow-sm border border-slate-200 space-y-4">
+      <Toast message={purchaseToast} onClose={() => setPurchaseToast(null)} />
+      <Modal
+        open={purchaseModalOpen}
+        title={purchaseModalMode === 'new' ? 'Nova compra' : 'Editar compra'}
+        onClose={() => setPurchaseModalOpen(false)}
+      >
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="text-xs text-slate-500">Fornecedor</label>
+              <input
+                className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
+                value={purchaseForm.fornecedor}
+                onChange={(e) => setPurchaseForm((p) => ({ ...p, fornecedor: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-slate-500">Nota</label>
+              <input
+                className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
+                value={purchaseForm.nota}
+                onChange={(e) => setPurchaseForm((p) => ({ ...p, nota: e.target.value }))}
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="text-xs text-slate-500">Data</label>
+              <input
+                type="date"
+                className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
+                value={purchaseForm.data}
+                onChange={(e) => setPurchaseForm((p) => ({ ...p, data: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-slate-500">Situacao</label>
+              <select
+                className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
+                value={purchaseForm.situacao}
+                onChange={(e) => setPurchaseForm((p) => ({ ...p, situacao: e.target.value }))}
+              >
+                <option value="Pendente">Pendente</option>
+                <option value="Concluida">Concluida</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-semibold text-slate-700">Itens</h4>
+              <button
+                className="text-xs text-emerald-600 font-semibold"
+                onClick={() =>
+                  setPurchaseForm((p) => ({
+                    ...p,
+                    itens: [...(p.itens || []), { produtoId: '', quantidade: 1, valor: 0 }],
+                  }))
+                }
+              >
+                + Adicionar item
+              </button>
+            </div>
+            <div className="space-y-3">
+              {(purchaseForm.itens || []).map((item, idx) => (
+                <div key={idx} className="grid grid-cols-6 gap-2 items-end border border-slate-200 rounded-md p-2">
+                  <div className="col-span-3 space-y-1">
+                    <label className="text-xs text-slate-500">Produto</label>
+                    <input
+                      className="w-full border border-slate-200 rounded-md px-2 py-1 text-sm"
+                      value={item.produtoId}
+                      onChange={(e) =>
+                        setPurchaseForm((p) => {
+                          const itens = [...(p.itens || [])]
+                          itens[idx] = { ...itens[idx], produtoId: e.target.value }
+                          return { ...p, itens }
+                        })
+                      }
+                      placeholder="Cod ou nome"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs text-slate-500">Qtd</label>
+                    <input
+                      type="number"
+                      min="1"
+                      className="w-full border border-slate-200 rounded-md px-2 py-1 text-sm"
+                      value={item.quantidade}
+                      onChange={(e) =>
+                        setPurchaseForm((p) => {
+                          const itens = [...(p.itens || [])]
+                          itens[idx] = { ...itens[idx], quantidade: parseInt(e.target.value || '0') }
+                          return { ...p, itens }
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs text-slate-500">Valor unitario</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      className="w-full border border-slate-200 rounded-md px-2 py-1 text-sm"
+                      value={item.valor}
+                      onChange={(e) =>
+                        setPurchaseForm((p) => {
+                          const itens = [...(p.itens || [])]
+                          itens[idx] = { ...itens[idx], valor: parseFloat(e.target.value || '0') }
+                          return { ...p, itens }
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1 text-right">
+                    <span className="text-xs text-slate-500 block">Subtotal</span>
+                    <span className="text-sm font-semibold text-slate-700">
+                      {formatMoney((item.quantidade || 0) * (item.valor || 0))}
+                    </span>
+                  </div>
+                  <div className="col-span-6 flex justify-end">
+                    <button
+                      className="text-xs text-red-600 hover:underline"
+                      onClick={() =>
+                        setPurchaseForm((p) => ({
+                          ...p,
+                          itens: (p.itens || []).filter((_, i) => i !== idx),
+                        }))
+                      }
+                      disabled={(purchaseForm.itens || []).length === 1}
+                    >
+                      Remover
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center justify-between pt-2 border-t border-slate-200 text-sm font-semibold text-slate-700">
+              <span>Total:</span>
+              <span>{formatMoney(computeTotal(purchaseForm.itens || []))}</span>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <button className="border border-slate-200 px-3 py-2 rounded-md text-sm text-slate-700" onClick={() => setPurchaseModalOpen(false)}>
+              Cancelar
+            </button>
+            <button
+              className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-md text-sm font-semibold"
+              onClick={() => {
+                const itensLimpos =
+                  purchaseForm.itens
+                    ?.map((i) => ({
+                      produtoId: i.produtoId || '',
+                      quantidade: Math.max(0, Number(i.quantidade) || 0),
+                      valor: Math.max(0, Number(i.valor) || 0),
+                    }))
+                    .filter((i) => i.produtoId && i.quantidade > 0) || []
+                if (!purchaseForm.fornecedor.trim()) {
+                  setPurchaseToast('Fornecedor obrigatorio')
+                  return
+                }
+                if (!purchaseForm.data) {
+                  setPurchaseToast('Data obrigatoria')
+                  return
+                }
+                if (itensLimpos.length === 0) {
+                  setPurchaseToast('Adicione ao menos 1 item')
+                  return
+                }
+                const totalNorm = normalizeMoney(computeTotal(itensLimpos))
+                const payload: PurchaseRecord = {
+                  ...purchaseForm,
+                  itens: itensLimpos,
+                  total: totalNorm,
+                  registro: activeTab,
+                  id: purchaseEditId || crypto.randomUUID(),
+                }
+                const delta = buildStockDelta(itensLimpos)
+                if (!canApplyStock(delta)) {
+                  setPurchaseToast('Estoque insuficiente para essa compra.')
+                  return
+                }
+                applyStock(delta)
+                if (purchaseModalMode === 'new') {
+                  addCompra(payload)
+                } else if (purchaseEditId) {
+                  updateCompra(purchaseEditId, payload)
+                }
+                onFinanceUpsertPurchase(payload)
+                setPurchaseForm(purchaseDefaultForm)
+                setPurchaseModalOpen(false)
+                setPurchaseSelected([])
+              }}
+            >
+              Salvar
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-semibold text-[#0f3047]">Compras</h2>
+        <div className="flex gap-2">
+          <button
+            onClick={handlePurchaseNew}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold px-3 py-2 rounded-md transition"
+          >
+            Nova
+          </button>
+          <button
+            onClick={handlePurchaseEdit}
+            className="border border-slate-200 px-3 py-2 rounded-md text-sm text-slate-600"
+          >
+            Editar
+          </button>
+          <button
+            onClick={handlePurchaseDuplicate}
+            className="border border-slate-200 px-3 py-2 rounded-md text-sm text-slate-600"
+          >
+            Duplicar
+          </button>
+          <button
+            onClick={handlePurchaseDelete}
+            className="border border-slate-200 px-3 py-2 rounded-md text-sm text-slate-600"
+          >
+            Excluir
+          </button>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2 shadow-sm">
+        <button
+          className={`px-3 py-1.5 rounded-full border text-sm font-semibold transition ${
+            activeTab === 'compras' ? 'bg-amber-100 border-amber-300 text-[#0f3047]' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+          }`}
+        >
+          Compras
+        </button>
+        <div className="flex items-center gap-1 text-sm text-slate-700 ml-auto">
+          <button onClick={() => setPurchaseMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}>{'<'}</button>
+          <span className="px-2 capitalize">{formatMonthLabel(purchaseMonth)}</span>
+          <button onClick={() => setPurchaseMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}>{'>'}</button>
+        </div>
+        <input
+          value={purchaseSearch}
+          onChange={(e) => setPurchaseSearch(e.target.value)}
+          className="border border-slate-200 rounded-md px-3 py-2 text-sm text-slate-700 w-48"
+          placeholder="Buscar..."
+        />
+        <button className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-md text-sm font-semibold transition">
+          Buscar
+        </button>
+      </div>
+
+      <div className="overflow-hidden border border-slate-200 rounded-lg">
+        <table className="w-full border-collapse text-sm">
+          <thead className="bg-slate-50 text-slate-600">
+            <tr>
+              <th className="py-3 px-3 text-left w-10">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-emerald-600"
+                  onChange={togglePurchaseAll}
+                  checked={filteredPurchases.length > 0 && filteredPurchases.every((c) => purchaseSelected.includes(c.id))}
+                />
+              </th>
+              <th className="py-3 px-3 text-left w-20">Cod</th>
+              <th className="py-3 px-3 text-left">Fornecedor</th>
+              <th className="py-3 px-3 text-left">Nota</th>
+              <th className="py-3 px-3 text-left">Itens</th>
+              <th className="py-3 px-3 text-left w-32">Data</th>
+              <th className="py-3 px-3 text-left w-32">Situacao</th>
+              <th className="py-3 px-3 text-right w-32">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredPurchases.length === 0 ? (
+              <tr className="border-t border-slate-200">
+                <td colSpan={8} className="py-4 px-3 text-center text-slate-500">
+                  Nenhuma compra encontrada. Veja o mes anterior.
+                </td>
+              </tr>
+            ) : (
+              filteredPurchases.map((c) => (
+                <tr key={c.id} className="border-t border-slate-200">
+                  <td className="py-3 px-3 text-slate-700">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-emerald-600"
+                      checked={purchaseSelected.includes(c.id)}
+                      onChange={() => togglePurchase(c.id)}
+                    />
+                  </td>
+                  <td className="py-3 px-3 text-slate-700">{c.id}</td>
+                  <td className="py-3 px-3 text-slate-700">{c.fornecedor}</td>
+                  <td className="py-3 px-3 text-slate-700">{c.nota}</td>
+                  <td className="py-3 px-3 text-slate-700">
+                    <div className="space-y-0.5">
+                      {(c.itens || []).map((i: PurchaseItem, idx: number) => (
+                        <div key={idx} className="text-xs text-slate-600">
+                          {(produtosStock.find((p) => p.id === i.produtoId)?.nome || 'Item')} - {i.quantidade || 0} x {formatMoney(i.valor || 0)}
+                        </div>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="py-3 px-3 text-slate-700">{c.data}</td>
+                  <td className="py-3 px-3 text-slate-700">{c.situacao}</td>
+                  <td className="py-3 px-3 text-right text-slate-700">{formatMoney(c.total || 0)}</td>
+                </tr>
+              ))
+            )}
+            <tr className="bg-slate-50 border-t border-slate-200 font-semibold text-slate-700">
+              <td className="py-3 px-3" colSpan={7}>
+                TOTAL LISTADO ({filteredPurchases.length} itens)
+              </td>
+              <td className="py-3 px-3 text-right">
+                {formatMoney(filteredPurchases.reduce((acc, c) => acc + (c.total || 0), 0))}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
+function ClientesPage({
+  activeTab,
+  setActiveTab,
+  openNewSignal,
+}: {
+  activeTab: ContactTab
+  setActiveTab: (t: ContactTab) => void
+  openNewSignal: number
+}) {
   const [contactSearch, setContactSearch] = useState('')
   const [contactToast, setContactToast] = useState<string | null>(null)
   const [contactModalOpen, setContactModalOpen] = useState(false)
@@ -1716,12 +2937,20 @@ function ClientesPage({ activeTab, setActiveTab }: { activeTab: ContactTab; setA
     setContactSelected(all ? [] : ids)
   }
 
-  const handleContatoNew = () => {
+  const handleContatoNew = useCallback(() => {
     setContactModalMode('new')
     setContactEditId(null)
     setContactForm({ nome: '', fones: '', palavras: '', cidade: '' })
     setContactModalOpen(true)
-  }
+  }, [])
+
+  const contactNewRef = useRef(0)
+  useEffect(() => {
+    if (openNewSignal > contactNewRef.current) {
+      contactNewRef.current = openNewSignal
+      setTimeout(() => handleContatoNew(), 0)
+    }
+  }, [openNewSignal, handleContatoNew])
 
   const handleContatoEdit = () => {
     if (contactSelected.length !== 1) {
@@ -1981,7 +3210,15 @@ function ClientesPage({ activeTab, setActiveTab }: { activeTab: ContactTab; setA
   )
 }
 
-function ProdutosPage({ activeTab, setActiveTab }: { activeTab: ProductTab; setActiveTab: (t: ProductTab) => void }) {
+function ProdutosPage({
+  activeTab,
+  setActiveTab,
+  openNewSignal,
+}: {
+  activeTab: ProductTab
+  setActiveTab: (t: ProductTab) => void
+  openNewSignal: number
+}) {
   const [productSearch, setProductSearch] = useState('')
   const [productSelected, setProductSelected] = useState<string[]>([])
   const [productToast, setProductToast] = useState<string | null>(null)
@@ -2000,24 +3237,7 @@ function ProdutosPage({ activeTab, setActiveTab }: { activeTab: ProductTab; setA
   const [productForm, setProductForm] = useState(productDefaultForm)
   const [productEditId, setProductEditId] = useState<string | null>(null)
 
-  const { items: produtos, add: addProduto, update: updateProduto, remove: removeProduto } = useLocalCrud('erp.produtos', [
-    { id: 'P001', nome: 'Notebook Pro', categoria: 'Eletronicos', preco: 5200, estoque: 8, palavras: 'notebook', tipo: 'produtos' },
-    { id: 'P002', nome: 'Mouse', categoria: 'Acessorios', preco: 80, estoque: 120, palavras: 'periferico', tipo: 'produtos' },
-    { id: 'S001', nome: 'Instalacao', categoria: '', preco: 150, estoque: 0, palavras: 'setup', tipo: 'servicos' },
-    { id: 'S002', nome: 'Manutencao', categoria: '', preco: 200, estoque: 0, palavras: 'suporte', tipo: 'servicos' },
-    {
-      id: 'A001',
-      nome: 'Ajuste inventario',
-      categoria: '',
-      preco: 0,
-      estoque: 0,
-      palavras: 'inventario',
-      tipo: 'ajuste',
-      contato: 'Equipe estoque',
-      observacoes: 'Ajuste trimestral',
-      data: '2025-11-10',
-    },
-  ])
+  const { items: produtos, add: addProduto, update: updateProduto, remove: removeProduto } = useLocalCrud('erp.produtos', produtosSeed)
 
   const prodTerm = productSearch.trim().toLowerCase()
   const filteredProdutos = produtos.filter((p) => {
@@ -2053,7 +3273,7 @@ function ProdutosPage({ activeTab, setActiveTab }: { activeTab: ProductTab; setA
     setProductSelected(all ? [] : ids)
   }
 
-  const handleProdutoNew = () => {
+  const handleProdutoNew = useCallback(() => {
     setProductModalMode('new')
     setProductEditId(null)
     setProductForm({
@@ -2067,7 +3287,15 @@ function ProdutosPage({ activeTab, setActiveTab }: { activeTab: ProductTab; setA
       data: new Date().toISOString().slice(0, 10),
     })
     setProductModalOpen(true)
-  }
+  }, [])
+
+  const productNewRef = useRef(0)
+  useEffect(() => {
+    if (openNewSignal > productNewRef.current) {
+      productNewRef.current = openNewSignal
+      setTimeout(() => handleProdutoNew(), 0)
+    }
+  }, [openNewSignal, handleProdutoNew])
 
   const handleProdutoEdit = () => {
     if (productSelected.length !== 1) {

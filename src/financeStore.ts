@@ -12,6 +12,7 @@ export type FinanceEntry = {
   situacao: 'Pendente' | 'Pago' | 'Recebido'
   valor: number
   referente?: string
+  comprovante?: string
 }
 
 const STORAGE_KEY = 'erp.finance.entries'
@@ -53,20 +54,17 @@ const sample: FinanceEntry[] = [
 ]
 
 export function useFinanceStore() {
-  const [entries, setEntries] = useState<FinanceEntry[]>([])
-
-  useEffect(() => {
+  const [entries, setEntries] = useState<FinanceEntry[]>(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY)
       if (raw) {
-        setEntries(JSON.parse(raw))
-      } else {
-        setEntries(sample)
+        return JSON.parse(raw)
       }
-    } catch (e) {
-      setEntries(sample)
+    } catch (err) {
+      console.warn('Falha ao carregar financeiros do storage', err)
     }
-  }, [])
+    return sample
+  })
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(entries))
@@ -75,10 +73,14 @@ export function useFinanceStore() {
   const addEntry = (data: Omit<FinanceEntry, 'id'>) => {
     const id = crypto.randomUUID()
     setEntries((prev) => [...prev, { ...data, id }])
+    return id
   }
 
   const removeEntry = (id: string) => {
     setEntries((prev) => prev.filter((item) => item.id !== id))
+  }
+  const updateEntry = (id: string, data: Partial<FinanceEntry>) => {
+    setEntries((prev) => prev.map((item) => (item.id === id ? { ...item, ...data } : item)))
   }
 
   const summary = useMemo(() => {
@@ -111,6 +113,7 @@ export function useFinanceStore() {
     entries,
     addEntry,
     removeEntry,
+    updateEntry,
     summary,
   }
 }
