@@ -61,6 +61,7 @@ type PurchaseRecord = {
   situacao: string
   itens: PurchaseItem[]
   total: number
+  status?: 'Concluida' | 'Rascunho'
 }
 type ConfigTab = 'geral' | 'plano' | 'caixa' | 'operacoes' | 'formas' | 'usuarios' | 'fiscal' | 'impressao'
 type Page = 'Dashboard' | 'Financeiro' | 'Vendas' | 'Compras' | 'Clientes' | 'Produtos' | 'Relatorios' | 'Configuracoes'
@@ -944,6 +945,8 @@ function FinanceiroPage({
   const [statusFilter, setStatusFilter] = useState<'todos' | 'pendente' | 'quitado'>('todos')
   const [dataInicial, setDataInicial] = useState('')
   const [dataFinal, setDataFinal] = useState('')
+  const [contaFilter, setContaFilter] = useState('')
+  const [categoriaFilter, setCategoriaFilter] = useState('')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [novo, setNovo] = useState({
     descricao: '',
@@ -988,6 +991,9 @@ function FinanceiroPage({
       entryDate.getFullYear() === financeMonth.getFullYear()
 
     if (!sameMonth) return false
+
+    if (contaFilter && e.conta.toLowerCase().indexOf(contaFilter.toLowerCase()) === -1) return false
+    if (categoriaFilter && e.referente && e.referente.toLowerCase().indexOf(categoriaFilter.toLowerCase()) === -1) return false
 
     if (dataInicial) {
       const ini = new Date(dataInicial)
@@ -1035,6 +1041,31 @@ function FinanceiroPage({
     setSelectedIds(all ? [] : ids)
   }
 
+  const handleEdit = () => {
+    if (selectedIds.length !== 1) {
+      alert('Selecione apenas um registro para editar.')
+      return
+    }
+    const current = entries.find((e) => e.id === selectedIds[0])
+    if (!current) return
+    setEditId(current.id)
+    setNovo({
+      descricao: current.descricao,
+      contato: current.contato,
+      conta: current.conta,
+      data: current.data,
+      valor: String(current.valor).replace('.', ','),
+      situacao: current.situacao,
+      referente: current.referente || '',
+      cpfCnpj: '',
+      vias: '1 via',
+      quemEmite: 'Empresa',
+      conciliado: current.conciliado || false,
+      comprovante: current.comprovante || '',
+    })
+    setViewMode('form')
+  }
+
   const markQuitado = () => {
     if (selectedIds.length === 0 || activeTab === 'recibos') return
     const situacao = activeTab === 'pagamentos' ? 'Pago' : 'Recebido'
@@ -1042,6 +1073,16 @@ function FinanceiroPage({
       const current = entries.find((e) => e.id === id)
       if (!current) return
       updateEntry(id, { ...current, situacao })
+    })
+    setSelectedIds([])
+  }
+
+  const reabrir = () => {
+    if (selectedIds.length === 0 || activeTab === 'recibos') return
+    selectedIds.forEach((id) => {
+      const current = entries.find((e) => e.id === id)
+      if (!current) return
+      updateEntry(id, { ...current, situacao: 'Pendente', conciliado: false })
     })
     setSelectedIds([])
   }
@@ -1201,14 +1242,20 @@ function FinanceiroPage({
         {viewMode === 'list' ? (
           <>
             <button
-              onClick={() => setViewMode('form')}
+              onClick={() => {
+                setEditId(null)
+                setViewMode('form')
+              }}
               style={{ backgroundColor: buttonPalette[activeTab].bg }}
               className="text-white text-sm font-semibold px-4 py-2 rounded-md transition shadow inline-flex items-center gap-2 hover:brightness-90"
             >
               <span>+</span>
               <span>Novo</span>
             </button>
-            <button className="border border-slate-200 text-slate-700 text-sm px-3 py-2 rounded-md bg-white hover:bg-slate-50">
+            <button
+              onClick={handleEdit}
+              className="border border-slate-200 text-slate-700 text-sm px-3 py-2 rounded-md bg-white hover:bg-slate-50"
+            >
               Editar
             </button>
             <button
@@ -1228,6 +1275,17 @@ function FinanceiroPage({
                 }`}
               >
                 Marcar como {activeTab === 'pagamentos' ? 'Pago' : 'Recebido'}
+              </button>
+              <button
+                onClick={reabrir}
+                disabled={selectedIds.length === 0 || activeTab === 'recibos'}
+                className={`text-sm px-3 py-2 rounded-md border ${
+                  selectedIds.length === 0 || activeTab === 'recibos'
+                    ? 'bg-slate-100 text-slate-400 border-slate-200'
+                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                Reabrir (pendente)
               </button>
               <button
                 onClick={conciliar}
@@ -1254,6 +1312,18 @@ function FinanceiroPage({
               Exportar PDF
             </button>
             <div className="ml-auto flex items-center gap-2">
+              <input
+                value={contaFilter}
+                onChange={(e) => setContaFilter(e.target.value)}
+                className="border border-slate-200 rounded-md px-3 py-2 text-sm text-slate-700 w-32"
+                placeholder="Conta"
+              />
+              <input
+                value={categoriaFilter}
+                onChange={(e) => setCategoriaFilter(e.target.value)}
+                className="border border-slate-200 rounded-md px-3 py-2 text-sm text-slate-700 w-32"
+                placeholder="Categoria/ref."
+              />
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
@@ -1399,31 +1469,40 @@ function FinanceiroPage({
                     placeholder="Caixa interno"
                   />
                 </div>
-                <div className="space-y-2">
-                  <label className="text-xs text-slate-500">Recebido de / Pago para</label>
-                  <input
-                    className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
-                    value={novo.contato}
-                    onChange={(e) => setNovo((p) => ({ ...p, contato: e.target.value }))}
-                    placeholder="Cliente / Fornecedor"
-                  />
-                </div>
-                <div className="space-y-2 md:col-span-2">
-                  <label className="text-xs text-slate-500">Categoria / Palavras-chave</label>
-                  <div className="grid md:grid-cols-2 gap-2">
-                    <input
-                      className="border border-slate-200 rounded-md px-3 py-2 text-sm"
-                      placeholder="Categoria"
-                      onChange={(e) => setNovo((p) => ({ ...p, conta: e.target.value }))}
-                    />
-                    <input
-                      className="border border-slate-200 rounded-md px-3 py-2 text-sm"
-                      placeholder="Palavras-chave"
-                      onChange={(e) => setNovo((p) => ({ ...p, contato: e.target.value }))}
-                    />
-                  </div>
-                </div>
+            <div className="space-y-2">
+              <label className="text-xs text-slate-500">Recebido de / Pago para</label>
+              <input
+                className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
+                value={novo.contato}
+                onChange={(e) => setNovo((p) => ({ ...p, contato: e.target.value }))}
+                placeholder="Cliente / Fornecedor"
+              />
+            </div>
+            <div className="space-y-2 md:col-span-2">
+              <label className="text-xs text-slate-500">Categoria / Palavras-chave</label>
+              <div className="grid md:grid-cols-2 gap-2">
+                <input
+                  className="border border-slate-200 rounded-md px-3 py-2 text-sm"
+                  placeholder="Categoria"
+                  onChange={(e) => setNovo((p) => ({ ...p, conta: e.target.value }))}
+                />
+                <input
+                  className="border border-slate-200 rounded-md px-3 py-2 text-sm"
+                  placeholder="Palavras-chave"
+                  onChange={(e) => setNovo((p) => ({ ...p, contato: e.target.value }))}
+                />
               </div>
+            </div>
+            <div className="space-y-2 md:col-span-2">
+              <label className="text-xs text-slate-500">Comprovante (nome ou link)</label>
+              <input
+                className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
+                value={novo.comprovante}
+                onChange={(e) => setNovo((p) => ({ ...p, comprovante: e.target.value }))}
+                placeholder="Ex.: boleto.pdf ou URL"
+              />
+            </div>
+          </div>
               <div className="flex justify-end">
                 <button
                   onClick={onSubmit}
@@ -1533,6 +1612,7 @@ function FinanceiroPage({
               <th className="py-3 px-3 text-left w-32">Data</th>
               <th className="py-3 px-3 text-left w-32">Situacao</th>
               <th className="py-3 px-3 text-right w-32">Valor</th>
+              <th className="py-3 px-3 text-left w-24">Comprovante</th>
               <th className="py-3 px-3 text-right w-12"></th>
             </tr>
           </thead>
@@ -1569,6 +1649,15 @@ function FinanceiroPage({
                     </span>
                   </td>
                   <td className="py-3 px-3 text-right text-slate-800">{formatMoney(e.valor)}</td>
+                  <td className="py-3 px-3 text-slate-700 text-xs truncate max-w-[160px]">
+                    {e.comprovante ? (
+                      <a className="text-blue-700 hover:underline" href={e.comprovante} target="_blank" rel="noreferrer">
+                        {e.comprovante}
+                      </a>
+                    ) : (
+                      '-'
+                    )}
+                  </td>
                   <td className="py-3 px-3 text-right">
                     <button
                       onClick={() => removeEntry(e.id)}
@@ -1637,6 +1726,7 @@ function VendasPage({
       tipo: activeTab === 'devolucoes' ? 'Devolucao' : 'Venda',
       itens: [{ produtoId: '', quantidade: 1, valor: 0 }],
       total: 0,
+      situacao: 'Concluida' as 'Concluida' | 'Rascunho',
     }),
     [activeTab],
   )
@@ -1653,6 +1743,7 @@ function VendasPage({
       tipo: 'Venda',
       total: 1520.5,
       registro: 'vendas' as SalesTab,
+      situacao: 'Concluida',
       itens: [{ produtoId: 'P001', quantidade: 1, valor: 1520.5 }],
     },
     {
@@ -1663,6 +1754,7 @@ function VendasPage({
       tipo: 'Venda',
       total: 820.0,
       registro: 'vendas' as SalesTab,
+      situacao: 'Concluida',
       itens: [{ produtoId: 'P002', quantidade: 2, valor: 410 }],
     },
     {
@@ -1673,6 +1765,7 @@ function VendasPage({
       tipo: 'Devolucao',
       total: 210.0,
       registro: 'devolucoes' as SalesTab,
+      situacao: 'Concluida',
       itens: [{ produtoId: 'P002', quantidade: 1, valor: 210 }],
     },
   ])
@@ -1767,6 +1860,7 @@ function VendasPage({
           valor: i.valor || 0,
         })) || [{ produtoId: '', quantidade: 1, valor: 0 }],
       total: current.total,
+      situacao: current.situacao || 'Concluida',
     })
     setSalesModalOpen(true)
   }
