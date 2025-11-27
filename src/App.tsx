@@ -17,16 +17,20 @@ type ProductItem = {
   categoria: string
   preco: number
   estoque: number
+  estoqueMinimo?: number
   palavras?: string
   tipo: 'produtos' | 'servicos' | 'ajuste'
   contato?: string
   observacoes?: string
   data?: string
+  documentos?: string[]
+  camposExtras?: string
+  movimento?: { data: string; tipo: 'ajuste' | 'venda' | 'compra'; quantidade: number }[]
 }
 
 const produtosSeed: ProductItem[] = [
-  { id: 'P001', nome: 'Notebook Pro', categoria: 'Eletronicos', preco: 5200, estoque: 8, palavras: 'notebook', tipo: 'produtos' },
-  { id: 'P002', nome: 'Mouse', categoria: 'Acessorios', preco: 80, estoque: 120, palavras: 'periferico', tipo: 'produtos' },
+  { id: 'P001', nome: 'Notebook Pro', categoria: 'Eletronicos', preco: 5200, estoque: 8, estoqueMinimo: 2, palavras: 'notebook', tipo: 'produtos', documentos: [], camposExtras: '' },
+  { id: 'P002', nome: 'Mouse', categoria: 'Acessorios', preco: 80, estoque: 120, estoqueMinimo: 20, palavras: 'periferico', tipo: 'produtos', documentos: [], camposExtras: '' },
   { id: 'S001', nome: 'Instalacao', categoria: '', preco: 150, estoque: 0, palavras: 'setup', tipo: 'servicos' },
   { id: 'S002', nome: 'Manutencao', categoria: '', preco: 200, estoque: 0, palavras: 'suporte', tipo: 'servicos' },
   {
@@ -561,6 +565,7 @@ export default function App() {
               entries={entries}
               addEntry={addEntry}
               removeEntry={removeEntry}
+              updateEntry={updateEntry}
               formatMoney={formatMoney}
             />
           )}
@@ -918,6 +923,7 @@ function FinanceiroPage({
   entries,
   addEntry,
   removeEntry,
+  updateEntry,
   formatMoney,
 }: {
   activeTab: FinanceTab
@@ -925,6 +931,7 @@ function FinanceiroPage({
   entries: FinanceEntry[]
   addEntry: (data: Omit<FinanceEntry, 'id'>) => void
   removeEntry: (id: string) => void
+  updateEntry: (id: string, data: Omit<FinanceEntry, 'id'>) => void
   formatMoney: (n: number) => string
 }) {
   const [viewMode, setViewMode] = useState<'list' | 'form'>('list')
@@ -933,6 +940,10 @@ function FinanceiroPage({
     const now = new Date()
     return new Date(now.getFullYear(), now.getMonth(), 1)
   })
+  const [statusFilter, setStatusFilter] = useState<'todos' | 'pendente' | 'quitado'>('todos')
+  const [dataInicial, setDataInicial] = useState('')
+  const [dataFinal, setDataFinal] = useState('')
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [novo, setNovo] = useState({
     descricao: '',
     contato: '',
@@ -944,6 +955,7 @@ function FinanceiroPage({
     cpfCnpj: '',
     vias: '1 via',
     quemEmite: 'Empresa',
+    conciliado: false,
   })
 
   const headerPalette: Record<FinanceTab, string> = {
@@ -975,6 +987,15 @@ function FinanceiroPage({
 
     if (!sameMonth) return false
 
+    if (dataInicial) {
+      const ini = new Date(dataInicial)
+      if (!isNaN(ini.getTime()) && entryDate < ini) return false
+    }
+    if (dataFinal) {
+      const fim = new Date(dataFinal)
+      if (!isNaN(fim.getTime()) && entryDate > fim) return false
+    }
+
     const matchesTab =
       activeTab === 'recebimentos'
         ? e.tipo === 'recebimento'
@@ -983,6 +1004,11 @@ function FinanceiroPage({
         : e.tipo === 'recibo'
 
     if (!matchesTab) return false
+    if (statusFilter !== 'todos') {
+      const quitado = e.situacao === 'Recebido' || e.situacao === 'Pago'
+      if (statusFilter === 'pendente' && quitado) return false
+      if (statusFilter === 'quitado' && !quitado) return false
+    }
     if (!searchTerm) return true
 
     const haystack = [e.descricao, e.contato, e.referente, e.conta]
@@ -994,6 +1020,110 @@ function FinanceiroPage({
   })
 
   const total = filtered.reduce((acc, e) => acc + e.valor, 0)
+  const allSelected = filtered.length > 0 && filtered.every((e) => selectedIds.includes(e.id))
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+  }
+
+  const toggleSelectAll = () => {
+    if (filtered.length === 0) return
+    const ids = filtered.map((e) => e.id)
+    const all = ids.every((id) => selectedIds.includes(id))
+    setSelectedIds(all ? [] : ids)
+  }
+
+  const markQuitado = () => {
+    if (selectedIds.length === 0 || activeTab === 'recibos') return
+    const situacao = activeTab === 'pagamentos' ? 'Pago' : 'Recebido'
+    selectedIds.forEach((id) => {
+      const current = entries.find((e) => e.id === id)
+      if (!current) return
+      updateEntry(id, { ...current, situacao })
+    })
+    setSelectedIds([])
+  }
+
+  const exportCsv = () => {
+    if (filtered.length === 0) {
+      alert('Nada para exportar.')
+      return
+    }
+    const header = ['Descricao', 'Contato', 'Conta', 'Data', 'Situacao', 'Valor']
+    const rows = filtered.map((e) => [
+      e.descricao,
+      e.contato,
+      e.conta,
+      e.data,
+      e.situacao,
+      e.valor.toString().replace('.', ','),
+    ])
+    const csv = [header, ...rows]
+      .map((r) => r.map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(';'))
+      .join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `financeiro-${activeTab}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const removeSelected = () => {
+    if (selectedIds.length === 0) return
+    selectedIds.forEach((id) => removeEntry(id))
+    setSelectedIds([])
+  }
+
+  const conciliar = () => {
+    if (selectedIds.length === 0 || activeTab === 'recibos') return
+    const situacao = activeTab === 'pagamentos' ? 'Pago' : 'Recebido'
+    selectedIds.forEach((id) => {
+      const current = entries.find((e) => e.id === id)
+      if (!current) return
+      updateEntry(id, { ...current, situacao, conciliado: true })
+    })
+    setSelectedIds([])
+  }
+
+  const exportPdf = () => {
+    if (filtered.length === 0) {
+      alert('Nada para exportar.')
+      return
+    }
+    const win = window.open('', '_blank')
+    if (!win) return
+    const rows = filtered
+      .map(
+        (e, idx) =>
+          `<tr><td>${idx + 1}</td><td>${e.descricao}</td><td>${e.contato}</td><td>${e.conta}</td><td>${e.data}</td><td>${e.situacao}</td><td style="text-align:right">${formatMoney(
+            e.valor,
+          )}</td></tr>`,
+      )
+      .join('')
+    const html = `
+      <html><head><title>Financeiro - ${activeTab}</title>
+      <style>
+      body{font-family:Arial, sans-serif; padding:16px;}
+      table{width:100%; border-collapse:collapse;}
+      th,td{border:1px solid #ccc; padding:6px; font-size:12px;}
+      th{background:#f5f5f5;}
+      </style></head>
+      <body>
+      <h3>Financeiro - ${activeTab}</h3>
+      <table>
+        <thead><tr><th>#</th><th>Descricao</th><th>Contato</th><th>Conta</th><th>Data</th><th>Situacao</th><th>Valor</th></tr></thead>
+        <tbody>${rows}<tr><td colspan="6" style="text-align:right;font-weight:bold">Total</td><td style="text-align:right;font-weight:bold">${formatMoney(
+          total,
+        )}</td></tr></tbody>
+      </table>
+      </body></html>`
+    win.document.write(html)
+    win.document.close()
+    win.focus()
+    win.print()
+  }
 
   const onSubmit = () => {
     if (!novo.descricao.trim() && activeTab !== 'recibos' && !novo.referente.trim()) return
@@ -1014,6 +1144,7 @@ function FinanceiroPage({
           ? (novo.situacao as FinanceEntry['situacao'])
           : 'Recebido',
       valor: valorNum,
+      conciliado: novo.conciliado,
     })
     setNovo({
       descricao: '',
@@ -1072,13 +1203,72 @@ function FinanceiroPage({
             <button className="border border-slate-200 text-slate-700 text-sm px-3 py-2 rounded-md bg-white hover:bg-slate-50">
               Editar
             </button>
-            <button className="border border-slate-200 text-slate-700 text-sm px-3 py-2 rounded-md bg-white hover:bg-slate-50">
+            <button
+              onClick={removeSelected}
+              className="border border-slate-200 text-slate-700 text-sm px-3 py-2 rounded-md bg-white hover:bg-slate-50"
+            >
               Excluir
             </button>
-            <button className="border border-slate-200 text-slate-700 text-sm px-3 py-2 rounded-md bg-white hover:bg-slate-50">
-              Exportar
+            <div className="flex items-center gap-2">
+              <button
+                onClick={markQuitado}
+                disabled={selectedIds.length === 0 || activeTab === 'recibos'}
+                className={`text-sm px-3 py-2 rounded-md border ${
+                  selectedIds.length === 0 || activeTab === 'recibos'
+                    ? 'bg-slate-100 text-slate-400 border-slate-200'
+                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                Marcar como {activeTab === 'pagamentos' ? 'Pago' : 'Recebido'}
+              </button>
+              <button
+                onClick={conciliar}
+                disabled={selectedIds.length === 0 || activeTab === 'recibos'}
+                className={`text-sm px-3 py-2 rounded-md border ${
+                  selectedIds.length === 0 || activeTab === 'recibos'
+                    ? 'bg-slate-100 text-slate-400 border-slate-200'
+                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                Conciliar
+              </button>
+            </div>
+            <button
+              onClick={exportCsv}
+              className="border border-slate-200 text-slate-700 text-sm px-3 py-2 rounded-md bg-white hover:bg-slate-50"
+            >
+              Exportar CSV
+            </button>
+            <button
+              onClick={exportPdf}
+              className="border border-slate-200 text-slate-700 text-sm px-3 py-2 rounded-md bg-white hover:bg-slate-50"
+            >
+              Exportar PDF
             </button>
             <div className="ml-auto flex items-center gap-2">
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+                className="border border-slate-200 rounded-md px-3 py-2 text-sm text-slate-700"
+              >
+                <option value="todos">Todos</option>
+                <option value="pendente">Pendentes</option>
+                <option value="quitado">Recebidos/Pagos</option>
+              </select>
+              <input
+                type="date"
+                value={dataInicial}
+                onChange={(e) => setDataInicial(e.target.value)}
+                className="border border-slate-200 rounded-md px-3 py-2 text-sm text-slate-700"
+                title="Data inicial"
+              />
+              <input
+                type="date"
+                value={dataFinal}
+                onChange={(e) => setDataFinal(e.target.value)}
+                className="border border-slate-200 rounded-md px-3 py-2 text-sm text-slate-700"
+                title="Data final"
+              />
               <button
                 className="border border-slate-200 text-slate-700 text-sm px-3 py-2 rounded-md bg-white hover:bg-slate-50"
                 onClick={() => {
@@ -1320,6 +1510,14 @@ function FinanceiroPage({
         <table className="w-full border-collapse text-sm">
           <thead className="bg-slate-50 text-slate-600">
             <tr>
+              <th className="py-3 px-3 text-left w-10">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={toggleSelectAll}
+                  className="h-4 w-4 accent-amber-500"
+                />
+              </th>
               <th className="py-3 px-3 text-left w-20">Cod</th>
               <th className="py-3 px-3 text-left">Descricao</th>
               <th className="py-3 px-3 text-left">Contato</th>
@@ -1333,19 +1531,35 @@ function FinanceiroPage({
           <tbody>
             {filtered.length === 0 ? (
               <tr className="border-t border-slate-200">
-                <td colSpan={8} className="py-4 px-3 text-center text-slate-500">
+                <td colSpan={9} className="py-4 px-3 text-center text-slate-500">
                   Nenhum registro encontrado.
                 </td>
               </tr>
             ) : (
               filtered.map((e, idx) => (
                 <tr key={e.id} className="border-t border-slate-200">
+                  <td className="py-3 px-3">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.includes(e.id)}
+                      onChange={() => toggleSelect(e.id)}
+                      className="h-4 w-4 accent-amber-500"
+                    />
+                  </td>
                   <td className="py-3 px-3 text-slate-600">{idx + 1}</td>
                   <td className="py-3 px-3 text-slate-800">{e.descricao}</td>
                   <td className="py-3 px-3 text-slate-700">{e.contato}</td>
                   <td className="py-3 px-3 text-slate-700">{e.conta}</td>
                   <td className="py-3 px-3 text-slate-700">{e.data}</td>
-                  <td className="py-3 px-3 text-slate-700">{e.situacao}</td>
+                  <td className="py-3 px-3 text-slate-700">
+                    <span
+                      className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                        e.situacao === 'Pendente' ? 'bg-amber-100 text-amber-800' : 'bg-green-100 text-green-800'
+                      }`}
+                    >
+                      {e.situacao}
+                    </span>
+                  </td>
                   <td className="py-3 px-3 text-right text-slate-800">{formatMoney(e.valor)}</td>
                   <td className="py-3 px-3 text-right">
                     <button
@@ -1358,13 +1572,15 @@ function FinanceiroPage({
                 </tr>
               ))
             )}
-            <tr className="bg-slate-50 border-t border-slate-200 font-semibold text-slate-700">
-              <td className="py-3 px-3" colSpan={6}>
-                TOTAL LISTADO ({filtered.length} itens)
-              </td>
-              <td className="py-3 px-3 text-right">{formatMoney(total)}</td>
-              <td></td>
-            </tr>
+            {filtered.length > 0 && (
+              <tr className="bg-slate-50 border-t border-slate-200 font-semibold text-slate-700">
+                <td className="py-3 px-3" colSpan={7}>
+                  TOTAL LISTADO ({filtered.length} itens)
+                </td>
+                <td className="py-3 px-3 text-right">{formatMoney(total)}</td>
+                <td></td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -1623,6 +1839,53 @@ function VendasPage({
     URL.revokeObjectURL(url)
   }
 
+  const handleSalesPrint = () => {
+    if (salesSelected.length === 0) {
+      setSalesToast('Selecione ao menos um registro para imprimir.')
+      return
+    }
+    const registros = salesItems.filter((v) => salesSelected.includes(v.id))
+    if (registros.length === 0) return
+    const rows = registros
+      .map(
+        (v) =>
+          `<h4 style="margin:4px 0;">Venda ${v.id}</h4>
+          <div style="font-size:12px;margin-bottom:4px;">Cliente: ${v.cliente || '-'} | Vendedor: ${v.vendedor || '-'} | Data: ${
+            v.data
+          } | Tipo: ${v.tipo}</div>
+          <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:8px;">
+            <thead><tr><th style="border:1px solid #ccc;padding:4px;">Produto</th><th style="border:1px solid #ccc;padding:4px;">Qtd</th><th style="border:1px solid #ccc;padding:4px;">Valor</th><th style="border:1px solid #ccc;padding:4px;">Subtotal</th></tr></thead>
+            <tbody>
+            ${
+              v.itens
+                ?.map((i) => {
+                  const prod = produtosStock.find((p) => p.id === i.produtoId)
+                  const nome = prod?.nome || i.produtoId || '-'
+                  const subtotal = (i.quantidade || 0) * (i.valor || 0)
+                  return `<tr><td style="border:1px solid #ccc;padding:4px;">${nome}</td><td style="border:1px solid #ccc;padding:4px;">${
+                    i.quantidade || 0
+                  }</td><td style="border:1px solid #ccc;padding:4px;">${formatMoney(i.valor || 0)}</td><td style="border:1px solid #ccc;padding:4px;">${formatMoney(
+                    subtotal,
+                  )}</td></tr>`
+                })
+                .join('') || ''
+            }
+            <tr><td colspan="3" style="text-align:right;border:1px solid #ccc;padding:4px;font-weight:bold;">Total</td><td style="border:1px solid #ccc;padding:4px;font-weight:bold;">${formatMoney(
+              v.total,
+            )}</td></tr>
+            </tbody>
+          </table>`,
+      )
+      .join('<hr/>')
+    const html = `<html><head><title>Comprovante de venda</title></head><body style="font-family:Arial,sans-serif;padding:16px;">${rows}</body></html>`
+    const w = window.open('', '_blank')
+    if (!w) return
+    w.document.write(html)
+    w.document.close()
+    w.focus()
+    w.print()
+  }
+
   return (
     <section className="bg-white rounded-xl p-4 shadow-sm border border-slate-200 space-y-4">
       <Toast message={salesToast} onClose={() => setSalesToast(null)} />
@@ -1878,7 +2141,13 @@ function VendasPage({
             onClick={handleSalesExport}
             className="border border-slate-200 px-3 py-2 rounded-md text-sm text-slate-600"
           >
-            Exportar
+            Exportar CSV
+          </button>
+          <button
+            onClick={handleSalesPrint}
+            className="border border-slate-200 px-3 py-2 rounded-md text-sm text-slate-600"
+          >
+            Imprimir
           </button>
         </div>
         <div className="flex gap-2 items-center">
@@ -2110,6 +2379,54 @@ function ComprasPage({ activeTab, setActiveTab }: { activeTab: PurchaseTab; setA
     a.download = 'compras.csv'
     a.click()
     URL.revokeObjectURL(url)
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const handlePurchasePrint = () => {
+    if (purchaseSelected.length === 0) {
+      setPurchaseToast('Selecione ao menos um registro para imprimir.')
+      return
+    }
+    const registros = compras.filter((c) => purchaseSelected.includes(c.id))
+    if (registros.length === 0) return
+    const rows = registros
+      .map(
+        (c) =>
+          `<h4 style="margin:4px 0;">Compra ${c.id}</h4>
+          <div style="font-size:12px;margin-bottom:4px;">Fornecedor: ${c.fornecedor || '-'} | Nota: ${c.nota || '-'} | Data: ${
+            c.data
+          } | Situacao: ${c.situacao}</div>
+          <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:8px;">
+            <thead><tr><th style="border:1px solid #ccc;padding:4px;">Produto</th><th style="border:1px solid #ccc;padding:4px;">Qtd</th><th style="border:1px solid #ccc;padding:4px;">Valor</th><th style="border:1px solid #ccc;padding:4px;">Subtotal</th></tr></thead>
+            <tbody>
+            ${
+              c.itens
+                ?.map((i) => {
+                  const prod = produtosStock.find((p) => p.id === i.produtoId)
+                  const nome = prod?.nome || i.produtoId || '-'
+                  const subtotal = (i.quantidade || 0) * (i.valor || 0)
+                  return `<tr><td style="border:1px solid #ccc;padding:4px;">${nome}</td><td style="border:1px solid #ccc;padding:4px;">${
+                    i.quantidade || 0
+                  }</td><td style="border:1px solid #ccc;padding:4px;">${formatMoney(i.valor || 0)}</td><td style="border:1px solid #ccc;padding:4px;">${formatMoney(
+                    subtotal,
+                  )}</td></tr>`
+                })
+                .join('') || ''
+            }
+            <tr><td colspan="3" style="text-align:right;border:1px solid #ccc;padding:4px;font-weight:bold">Total</td><td style="border:1px solid #ccc;padding:4px;font-weight:bold;">${formatMoney(
+              c.total,
+            )}</td></tr>
+            </tbody>
+          </table>`,
+      )
+      .join('<hr/>')
+    const html = `<html><head><title>Comprovante de compra</title></head><body style="font-family:Arial,sans-serif;padding:16px;">${rows}</body></html>`
+    const w = window.open('', '_blank')
+    if (!w) return
+    w.document.write(html)
+    w.document.close()
+    w.focus()
+    w.print()
   }
 
   return (
@@ -2785,6 +3102,18 @@ function ComprasPageNovo({
           >
             Excluir
           </button>
+          <button
+            onClick={handlePurchaseExport}
+            className="border border-slate-200 px-3 py-2 rounded-md text-sm text-slate-600"
+          >
+            Exportar CSV
+          </button>
+          <button
+            onClick={handlePurchasePrint}
+            className="border border-slate-200 px-3 py-2 rounded-md text-sm text-slate-600"
+          >
+            Imprimir
+          </button>
         </div>
       </div>
 
@@ -3229,10 +3558,16 @@ function ProdutosPage({
     categoria: '',
     preco: 0,
     estoque: 0,
+    estoqueMinimo: 0,
     palavras: '',
     contato: '',
     observacoes: '',
     data: new Date().toISOString().slice(0, 10),
+    documentos: [] as string[],
+    camposExtras: '',
+    produtoId: '',
+    quantidade: 0,
+    movimento: [],
   }
   const [productForm, setProductForm] = useState(productDefaultForm)
   const [productEditId, setProductEditId] = useState<string | null>(null)
@@ -3263,6 +3598,23 @@ function ProdutosPage({
     return hay.includes(prodTerm)
   })
 
+  const movimentosRecentes = useMemo(() => {
+    const trintaDiasAtras = new Date()
+    trintaDiasAtras.setDate(trintaDiasAtras.getDate() - 30)
+    const vendas = salesItems.filter((v) => new Date(v.data) >= trintaDiasAtras)
+    const comprasMov = compras.filter((c) => new Date(c.data) >= trintaDiasAtras)
+    const mapa = new Set<string>()
+    vendas.forEach((v) => v.itens?.forEach((i) => mapa.add(i.produtoId)))
+    comprasMov.forEach((c) => c.itens?.forEach((i) => mapa.add(i.produtoId)))
+    return mapa
+  }, []) // salesItems/compras são da mesma renderização; mantemos memo simples
+
+  const alertasEstoque = useMemo(() => {
+    const baixo = filteredProdutos.filter((p) => (p.estoqueMinimo || 0) > 0 && p.estoque <= (p.estoqueMinimo || 0))
+    const semMov = filteredProdutos.filter((p) => !movimentosRecentes.has(p.id))
+    return { baixo, semMov }
+  }, [filteredProdutos, movimentosRecentes])
+
   const toggleProduto = (id: string) => {
     setProductSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
   }
@@ -3281,10 +3633,13 @@ function ProdutosPage({
       categoria: '',
       preco: 0,
       estoque: 0,
+      estoqueMinimo: 0,
       palavras: '',
       contato: '',
       observacoes: '',
       data: new Date().toISOString().slice(0, 10),
+      produtoId: '',
+      quantidade: 0,
     })
     setProductModalOpen(true)
   }, [])
@@ -3311,10 +3666,16 @@ function ProdutosPage({
       categoria: current.categoria,
       preco: current.preco,
       estoque: current.estoque,
+      estoqueMinimo: current.estoqueMinimo || 0,
       palavras: current.palavras || '',
       contato: current.contato || '',
       observacoes: current.observacoes || '',
       data: current.data || new Date().toISOString().slice(0, 10),
+      documentos: current.documentos || [],
+      camposExtras: current.camposExtras || '',
+      produtoId: current.id,
+      quantidade: 0,
+      movimento: current.movimento || [],
     })
     setProductModalOpen(true)
   }
@@ -3403,19 +3764,69 @@ function ProdutosPage({
                 />
               </div>
             </div>
-            {activeTab === 'produtos' && (
-              <div className="space-y-1">
-                <label className="text-xs text-slate-500">Estoque</label>
-                <input
-                  type="number"
+          {activeTab === 'produtos' && (
+            <div className="space-y-1">
+              <label className="text-xs text-slate-500">Estoque</label>
+              <input
+                type="number"
                   min="0"
                   step="1"
-                  className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
-                  value={productForm.estoque}
-                  onChange={(e) => setProductForm((p) => ({ ...p, estoque: parseFloat(e.target.value || '0') }))}
-                />
-              </div>
-            )}
+                className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
+                value={productForm.estoque}
+                onChange={(e) => setProductForm((p) => ({ ...p, estoque: parseFloat(e.target.value || '0') }))}
+              />
+            </div>
+          )}
+          {activeTab === 'produtos' && (
+            <div className="space-y-1">
+              <label className="text-xs text-slate-500">Estoque minimo</label>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
+                value={productForm.estoqueMinimo || 0}
+                onChange={(e) => setProductForm((p) => ({ ...p, estoqueMinimo: parseFloat(e.target.value || '0') }))}
+              />
+            </div>
+          )}
+          <div className="space-y-1">
+            <label className="text-xs text-slate-500">Observacoes</label>
+            <textarea
+              className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
+              value={productForm.observacoes}
+              onChange={(e) => setProductForm((p) => ({ ...p, observacoes: e.target.value }))}
+              rows={2}
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs text-slate-500">Campos customizados (texto livre)</label>
+            <textarea
+              className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
+              value={productForm.camposExtras}
+              onChange={(e) => setProductForm((p) => ({ ...p, camposExtras: e.target.value }))}
+              placeholder="Ex.: Cor=Azul; Fabricante=ABC"
+              rows={2}
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs text-slate-500">Anexar documentos (nomes)</label>
+            <input
+              type="text"
+              className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
+              value={productForm.documentos?.join(', ') || ''}
+              onChange={(e) =>
+                setProductForm((p) => ({
+                  ...p,
+                  documentos: e.target.value
+                    .split(',')
+                    .map((s) => s.trim())
+                    .filter(Boolean),
+                }))
+              }
+              placeholder="separe por virgula, ex.: nota.pdf, foto.png"
+            />
+          </div>
           </div>
           <div className="space-y-1">
             <label className="text-xs text-slate-500">Palavras-chave</label>
@@ -3428,6 +3839,33 @@ function ProdutosPage({
           {activeTab === 'ajuste' && (
             <>
               <div className="space-y-1">
+                <label className="text-xs text-slate-500">Produto</label>
+                <select
+                  className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
+                  value={productForm.produtoId || ''}
+                  onChange={(e) => setProductForm((p) => ({ ...p, produtoId: e.target.value }))}
+                >
+                  <option value="">Selecione</option>
+                  {produtos
+                    .filter((p) => p.tipo === 'produtos')
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.nome} ({p.id})
+                      </option>
+                    ))}
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-slate-500">Quantidade (+ entrada, - saida)</label>
+                <input
+                  type="number"
+                  step="1"
+                  className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
+                  value={productForm.quantidade ?? 0}
+                  onChange={(e) => setProductForm((p) => ({ ...p, quantidade: parseFloat(e.target.value || '0') }))}
+                />
+              </div>
+              <div className="space-y-1">
                 <label className="text-xs text-slate-500">Contato</label>
                 <input
                   className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
@@ -3438,11 +3876,31 @@ function ProdutosPage({
               <div className="space-y-1">
                 <label className="text-xs text-slate-500">Observacoes</label>
                 <input
-                  className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
-                  value={productForm.observacoes}
-                  onChange={(e) => setProductForm((p) => ({ ...p, observacoes: e.target.value }))}
-                />
-              </div>
+              className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
+              value={productForm.observacoes}
+              onChange={(e) => setProductForm((p) => ({ ...p, observacoes: e.target.value }))}
+            />
+          </div>
+          {activeTab !== 'ajuste' && (
+            <div className="space-y-1">
+              <label className="text-xs text-slate-500">Anexar documentos (nomes)</label>
+              <input
+                type="text"
+                className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
+                value={productForm.documentos?.join(', ') || ''}
+                onChange={(e) =>
+                  setProductForm((p) => ({
+                    ...p,
+                    documentos: e.target.value
+                      .split(',')
+                      .map((s) => s.trim())
+                      .filter(Boolean),
+                  }))
+                }
+                placeholder="separe por virgula, ex.: nota.pdf, foto.png"
+              />
+            </div>
+          )}
               <div className="space-y-1">
                 <label className="text-xs text-slate-500">Data</label>
                 <input
@@ -3475,7 +3933,42 @@ function ProdutosPage({
                 }
                 const precoNorm = normalizeMoney(productForm.preco)
                 const estoqueNorm = activeTab === 'produtos' ? normalizeInt(productForm.estoque) : productForm.estoque
-                if (productModalMode === 'new') {
+                if (activeTab === 'ajuste') {
+                  if (!productForm.produtoId) {
+                    setProductToast('Selecione um produto para ajustar.')
+                    return
+                  }
+                  const delta = productForm.quantidade || 0
+                  setProdutos((prev) =>
+                    prev.map((p) =>
+                      p.id === productForm.produtoId
+                        ? {
+                            ...p,
+                            estoque: (p.estoque || 0) + delta,
+                            movimento: [
+                              ...(p.movimento || []),
+                              { data: productForm.data, tipo: 'ajuste', quantidade: delta },
+                            ],
+                          }
+                        : p,
+                    ),
+                  )
+                  addProduto({
+                    id: crypto.randomUUID(),
+                    nome: productForm.nome || 'Ajuste de estoque',
+                    categoria: productForm.categoria || '',
+                    preco: 0,
+                    estoque: delta,
+                    tipo: 'ajuste',
+                    contato: productForm.contato,
+                    observacoes: productForm.observacoes,
+                    data: productForm.data,
+                    palavras: productForm.palavras,
+                    documentos: productForm.documentos,
+                    camposExtras: productForm.camposExtras,
+                    movimento: [{ data: productForm.data, tipo: 'ajuste', quantidade: delta }],
+                  })
+                } else if (productModalMode === 'new') {
                   addProduto({ ...productForm, preco: precoNorm, estoque: estoqueNorm, tipo: activeTab })
                 } else if (productEditId) {
                   updateProduto(productEditId, { ...productForm, preco: precoNorm, estoque: estoqueNorm })
@@ -3566,6 +4059,17 @@ function ProdutosPage({
         </div>
       </div>
 
+      {alertasEstoque.baixo.length > 0 && (
+        <div className="border border-amber-200 bg-amber-50 text-amber-900 px-3 py-2 rounded-md text-sm">
+          {alertasEstoque.baixo.length} produto(s) abaixo do estoque minimo.
+        </div>
+      )}
+      {alertasEstoque.semMov.length > 0 && (
+        <div className="border border-slate-200 bg-slate-50 text-slate-700 px-3 py-2 rounded-md text-sm">
+          {alertasEstoque.semMov.length} produto(s) sem movimento nos ultimos 30 dias.
+        </div>
+      )}
+
       {activeTab === 'produtos' && (
         <ProdutosTable
           items={filteredProdutos}
@@ -3600,7 +4104,7 @@ function ProdutosTable({
   onToggle,
   onToggleAll,
 }: {
-  items: { id: string; nome: string; categoria: string; preco: number; estoque: number }[]
+  items: { id: string; nome: string; categoria: string; preco: number; estoque: number; estoqueMinimo?: number; documentos?: string[] }[]
   selected: string[]
   onToggle: (id: string) => void
   onToggleAll: () => void
@@ -3623,6 +4127,7 @@ function ProdutosTable({
             <th className="py-3 px-3 text-left">Categoria</th>
             <th className="py-3 px-3 text-left w-32">Preco venda</th>
             <th className="py-3 px-3 text-left w-32">Estoque</th>
+            <th className="py-3 px-3 text-left w-32">Docs</th>
           </tr>
         </thead>
         <tbody>
@@ -3647,7 +4152,13 @@ function ProdutosTable({
                 <td className="py-3 px-3 text-slate-700">{p.nome}</td>
                 <td className="py-3 px-3 text-slate-700">{p.categoria}</td>
                 <td className="py-3 px-3 text-slate-700">{formatMoney(p.preco)}</td>
-                <td className="py-3 px-3 text-slate-700">{p.estoque}</td>
+                <td className="py-3 px-3 text-slate-700">
+                  {p.estoque}
+                  {p.estoqueMinimo !== undefined && p.estoqueMinimo > 0 && p.estoque <= p.estoqueMinimo && (
+                    <span className="ml-2 text-xs text-amber-700 font-semibold">(baixo)</span>
+                  )}
+                </td>
+                <td className="py-3 px-3 text-slate-700 text-xs">{p.documentos?.length || 0} doc(s)</td>
               </tr>
             ))
           )}
@@ -3736,7 +4247,7 @@ function AjusteTable({
   onToggle,
   onToggleAll,
 }: {
-  items: { id: string; motivo: string; contato: string; palavras: string; observacoes: string; data: string }[]
+  items: { id: string; motivo: string; contato: string; palavras: string; observacoes: string; data: string; estoque?: number }[]
   selected: string[]
   onToggle: (id: string) => void
   onToggleAll: () => void

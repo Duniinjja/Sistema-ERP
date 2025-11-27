@@ -13,6 +13,7 @@ export type FinanceEntry = {
   valor: number
   referente?: string
   comprovante?: string
+  conciliado?: boolean
 }
 
 const STORAGE_KEY = 'erp.finance.entries'
@@ -28,6 +29,7 @@ const sample: FinanceEntry[] = [
     situacao: 'Recebido',
     valor: 1200,
     referente: 'Pedido 1001',
+    conciliado: true,
   },
   {
     id: '2',
@@ -39,6 +41,7 @@ const sample: FinanceEntry[] = [
     situacao: 'Pago',
     valor: 550,
     referente: 'NF 2002',
+    conciliado: true,
   },
   {
     id: '3',
