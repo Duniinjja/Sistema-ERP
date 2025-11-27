@@ -935,6 +935,7 @@ function FinanceiroPage({
   formatMoney: (n: number) => string
 }) {
   const [viewMode, setViewMode] = useState<'list' | 'form'>('list')
+  const [editId, setEditId] = useState<string | null>(null)
   const [financeSearch, setFinanceSearch] = useState('')
   const [financeMonth, setFinanceMonth] = useState(() => {
     const now = new Date()
@@ -956,6 +957,7 @@ function FinanceiroPage({
     vias: '1 via',
     quemEmite: 'Empresa',
     conciliado: false,
+    comprovante: '',
   })
 
   const headerPalette: Record<FinanceTab, string> = {
@@ -1128,12 +1130,9 @@ function FinanceiroPage({
   const onSubmit = () => {
     if (!novo.descricao.trim() && activeTab !== 'recibos' && !novo.referente.trim()) return
     const valorNum = parseFloat(novo.valor.replace(',', '.')) || 0
-    addEntry({
+    const payload: Omit<FinanceEntry, 'id'> = {
       tipo: activeTab === 'recebimentos' ? 'recebimento' : activeTab === 'pagamentos' ? 'pagamento' : 'recibo',
-      descricao:
-        activeTab === 'recibos'
-          ? novo.referente || novo.descricao || 'Recibo'
-          : novo.descricao,
+      descricao: activeTab === 'recibos' ? novo.referente || novo.descricao || 'Recibo' : novo.descricao,
       contato: novo.contato || '-',
       conta: novo.conta || '-',
       data: novo.data,
@@ -1145,7 +1144,13 @@ function FinanceiroPage({
           : 'Recebido',
       valor: valorNum,
       conciliado: novo.conciliado,
-    })
+      comprovante: novo.comprovante,
+    }
+    if (editId) {
+      updateEntry(editId, payload)
+    } else {
+      addEntry(payload)
+    }
     setNovo({
       descricao: '',
       contato: '',
@@ -1157,7 +1162,10 @@ function FinanceiroPage({
       cpfCnpj: '',
       vias: '1 via',
       quemEmite: 'Empresa',
+      conciliado: false,
+      comprovante: '',
     })
+    setEditId(null)
     setViewMode('list')
   }
 
@@ -5710,3 +5718,4 @@ function RelatoriosPage() {
     </section>
   )
 }
+
