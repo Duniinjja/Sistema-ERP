@@ -3231,6 +3231,9 @@ function ClientesPage({
     fones: '',
     palavras: '',
     cidade: '',
+    observacoes: '',
+    documentos: [] as string[],
+    camposExtras: '',
   }
   const [contactForm, setContactForm] = useState(contactDefaultForm)
   const [contactEditId, setContactEditId] = useState<string | null>(null)
@@ -3269,7 +3272,7 @@ function ClientesPage({
   const handleContatoNew = useCallback(() => {
     setContactModalMode('new')
     setContactEditId(null)
-    setContactForm({ nome: '', fones: '', palavras: '', cidade: '' })
+    setContactForm({ nome: '', fones: '', palavras: '', cidade: '', observacoes: '', documentos: [], camposExtras: '' })
     setContactModalOpen(true)
   }, [])
 
@@ -3295,6 +3298,9 @@ function ClientesPage({
       fones: current.fones,
       palavras: current.palavras,
       cidade: current.cidade,
+      observacoes: current.observacoes || '',
+      documentos: current.documentos || [],
+      camposExtras: current.camposExtras || '',
     })
     setContactModalOpen(true)
   }
@@ -3371,6 +3377,41 @@ function ClientesPage({
               className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
               value={contactForm.palavras}
               onChange={(e) => setContactForm((p) => ({ ...p, palavras: e.target.value }))}
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs text-slate-500">Observacoes</label>
+            <textarea
+              className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
+              value={contactForm.observacoes}
+              onChange={(e) => setContactForm((p) => ({ ...p, observacoes: e.target.value }))}
+              rows={2}
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs text-slate-500">Campos customizados</label>
+            <textarea
+              className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
+              value={contactForm.camposExtras}
+              onChange={(e) => setContactForm((p) => ({ ...p, camposExtras: e.target.value }))}
+              placeholder="Ex.: CPF=000; IE=123"
+              rows={2}
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs text-slate-500">Documentos (nomes separados por virgula)</label>
+            <input
+              className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
+              value={contactForm.documentos?.join(', ') || ''}
+              onChange={(e) =>
+                setContactForm((p) => ({
+                  ...p,
+                  documentos: e.target.value
+                    .split(',')
+                    .map((s) => s.trim())
+                    .filter(Boolean),
+                }))
+              }
             />
           </div>
           <div className="space-y-1">
@@ -3460,6 +3501,46 @@ function ClientesPage({
             Excluir
           </button>
           <button
+            onClick={() => {
+              const input = document.createElement('input')
+              input.type = 'file'
+              input.accept = '.csv'
+              input.onchange = (e) => {
+                const file = (e.target as HTMLInputElement).files?.[0]
+                if (!file) return
+                const reader = new FileReader()
+                reader.onload = (ev) => {
+                  const text = String(ev.target?.result || '')
+                  const lines = text.split(/\r?\n/).filter(Boolean)
+                  const novos: ContactItem[] = []
+                  lines.forEach((line) => {
+                    const [id, nome, fones, palavras, cidade] = line.split(';').map((s) => s.replace(/"/g, '').trim())
+                    if (!nome) return
+                    novos.push({
+                      id: id || crypto.randomUUID(),
+                      nome,
+                      fones: fones || '',
+                      palavras: palavras || '',
+                      cidade: cidade || '',
+                      tipo: activeTab,
+                    })
+                  })
+                  if (novos.length > 0) {
+                    novos.forEach((n) => addContato(n))
+                    setContactToast(`${novos.length} registro(s) importados`)
+                  } else {
+                    setContactToast('Nenhum registro valido no CSV.')
+                  }
+                }
+                reader.readAsText(file, 'utf-8')
+              }
+              input.click()
+            }}
+            className="border border-slate-200 px-3 py-2 rounded-md text-sm text-slate-600"
+          >
+            Importar CSV
+          </button>
+          <button
             onClick={handleContatoExport}
             className="border border-slate-200 px-3 py-2 rounded-md text-sm text-slate-600"
           >
@@ -3493,14 +3574,15 @@ function ClientesPage({
               </th>
               <th className="py-3 px-3 text-left w-20">Cod</th>
               <th className="py-3 px-3 text-left">Nome</th>
-              <th className="py-3 px-3 text-left">Fones</th>
-              <th className="py-3 px-3 text-left">Palavras-chave</th>
-              <th className="py-3 px-3 text-left w-32">Cidade/UF</th>
-            </tr>
-          </thead>
-          <tbody>
-            {list.length === 0 ? (
-              <tr className="border-t border-slate-200">
+          <th className="py-3 px-3 text-left">Fones</th>
+          <th className="py-3 px-3 text-left">Palavras-chave</th>
+          <th className="py-3 px-3 text-left w-32">Cidade/UF</th>
+          <th className="py-3 px-3 text-left w-24">Docs</th>
+        </tr>
+      </thead>
+      <tbody>
+        {list.length === 0 ? (
+          <tr className="border-t border-slate-200">
                 <td colSpan={6} className="py-4 px-3 text-center text-slate-500">
                   {activeTab === 'clientes' && 'Nenhum cliente encontrado.'}
                   {activeTab === 'fornecedores' && 'Nenhum fornecedor encontrado.'}
@@ -3519,19 +3601,20 @@ function ClientesPage({
                     />
                   </td>
                   <td className="py-3 px-3 text-slate-700">{c.id}</td>
-                  <td className="py-3 px-3 text-slate-700">{c.nome}</td>
-                  <td className="py-3 px-3 text-slate-700">{c.fones}</td>
-                  <td className="py-3 px-3 text-slate-700">{c.palavras}</td>
-                  <td className="py-3 px-3 text-slate-700">{c.cidade}</td>
-                </tr>
-              ))
-            )}
-            <tr className="bg-slate-50 border-t border-slate-200 font-semibold text-slate-700">
-              <td className="py-3 px-3" colSpan={5}>
-                TOTAL LISTADO ({list.length} itens)
-              </td>
-              <td className="py-3 px-3 text-right">-</td>
-            </tr>
+            <td className="py-3 px-3 text-slate-700">{c.nome}</td>
+            <td className="py-3 px-3 text-slate-700">{c.fones}</td>
+            <td className="py-3 px-3 text-slate-700">{c.palavras}</td>
+            <td className="py-3 px-3 text-slate-700">{c.cidade}</td>
+            <td className="py-3 px-3 text-slate-700 text-xs">{(c as { documentos?: string[] }).documentos?.length || 0} doc(s)</td>
+          </tr>
+        ))
+      )}
+          <tr className="bg-slate-50 border-t border-slate-200 font-semibold text-slate-700">
+            <td className="py-3 px-3" colSpan={6}>
+              TOTAL LISTADO ({list.length} itens)
+            </td>
+            <td className="py-3 px-3 text-right">-</td>
+          </tr>
           </tbody>
         </table>
       </div>
@@ -4036,6 +4119,86 @@ function ProdutosPage({
             Excluir
           </button>
           <button
+            onClick={() => {
+              const input = document.createElement('input')
+              input.type = 'file'
+              input.accept = '.csv'
+              input.onchange = (e) => {
+                const file = (e.target as HTMLInputElement).files?.[0]
+                if (!file) return
+                const reader = new FileReader()
+                reader.onload = (ev) => {
+                  const text = String(ev.target?.result || '')
+                  const lines = text.split(/\r?\n/).filter(Boolean)
+                  const novos: ProductItem[] = []
+                  lines.forEach((line) => {
+                    const [id, nome, categoria, preco, estoque] = line.split(';').map((s) => s.replace(/"/g, '').trim())
+                    if (!nome) return
+                    novos.push({
+                      id: id || crypto.randomUUID(),
+                      nome,
+                      categoria: categoria || '',
+                      preco: Number(preco) || 0,
+                      estoque: Number(estoque) || 0,
+                      tipo: 'produtos',
+                    })
+                  })
+                  if (novos.length > 0) {
+                    novos.forEach((n) => addProduto(n))
+                    setProductToast(`${novos.length} produto(s) importados`)
+                  } else {
+                    setProductToast('Nenhum produto valido no CSV.')
+                  }
+                }
+                reader.readAsText(file, 'utf-8')
+              }
+              input.click()
+            }}
+            className="border border-slate-200 px-3 py-2 rounded-md text-sm text-slate-600"
+          >
+            Importar CSV
+          </button>
+          <button
+            onClick={() => {
+              const input = document.createElement('input')
+              input.type = 'file'
+              input.accept = '.csv'
+              input.onchange = (e) => {
+                const file = (e.target as HTMLInputElement).files?.[0]
+                if (!file) return
+                const reader = new FileReader()
+                reader.onload = (ev) => {
+                  const text = String(ev.target?.result || '')
+                  const lines = text.split(/\r?\n/).filter(Boolean)
+                  const novos: ProductItem[] = []
+                  lines.forEach((line) => {
+                    const [id, nome, categoria, preco, estoque] = line.split(';').map((s) => s.replace(/"/g, '').trim())
+                    if (!nome) return
+                    novos.push({
+                      id: id || crypto.randomUUID(),
+                      nome,
+                      categoria: categoria || '',
+                      preco: Number(preco) || 0,
+                      estoque: Number(estoque) || 0,
+                      tipo: 'produtos',
+                    })
+                  })
+                  if (novos.length > 0) {
+                    novos.forEach((n) => addProduto(n))
+                    setProductToast(`${novos.length} produto(s) importados`)
+                  } else {
+                    setProductToast('Nenhum produto valido no CSV.')
+                  }
+                }
+                reader.readAsText(file, 'utf-8')
+              }
+              input.click()
+            }}
+            className="border border-slate-200 px-3 py-2 rounded-md text-sm text-slate-600"
+          >
+            Importar CSV
+          </button>
+          <button
             onClick={() =>
               handleProdutoExport(
                 activeTab === 'produtos' ? filteredProdutos : activeTab === 'servicos' ? filteredServicos : filteredAjustes,
@@ -4271,6 +4434,7 @@ function AjusteTable({
             <th className="py-3 px-3 text-left">Palavras-chave</th>
             <th className="py-3 px-3 text-left">Observacoes</th>
             <th className="py-3 px-3 text-left w-32">Data</th>
+            <th className="py-3 px-3 text-left w-20">Qtd</th>
           </tr>
         </thead>
         <tbody>
@@ -4295,13 +4459,14 @@ function AjusteTable({
                 <td className="py-3 px-3 text-slate-700">{a.motivo}</td>
                 <td className="py-3 px-3 text-slate-700">{a.contato}</td>
                 <td className="py-3 px-3 text-slate-700">{a.palavras}</td>
-                <td className="py-3 px-3 text-slate-700">{a.observacoes}</td>
-                <td className="py-3 px-3 text-slate-700">{a.data}</td>
+              <td className="py-3 px-3 text-slate-700">{a.observacoes}</td>
+              <td className="py-3 px-3 text-slate-700">{a.data}</td>
+              <td className="py-3 px-3 text-slate-700">{a.estoque ?? '-'}</td>
               </tr>
             ))
           )}
           <tr className="bg-slate-50 border-t border-slate-200 font-semibold text-slate-700">
-            <td className="py-3 px-3" colSpan={5}>
+            <td className="py-3 px-3" colSpan={7}>
               TOTAL LISTADO ({items.length} itens)
             </td>
             <td className="py-3 px-3 text-right">-</td>
