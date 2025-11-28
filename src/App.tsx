@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Pie, PieChart, ResponsiveContainer, Cell, LineChart, Line, XAxis, Tooltip } from 'recharts'
 import { useFinanceStore, type FinanceEntry } from './financeStore'
 import { useLocalCrud } from './store'
+import { ReportsPanel } from './components/ReportsPanel'
 
 const pieColors = ['#0f3047', '#f5a524', '#2fbf71']
 
@@ -26,6 +27,7 @@ type ProductItem = {
   documentos?: string[]
   camposExtras?: string
   movimento?: { data: string; tipo: 'ajuste' | 'venda' | 'compra'; quantidade: number }[]
+  produtoId?: string // usado em ajustes
 }
 
 const produtosSeed: ProductItem[] = [
@@ -58,10 +60,43 @@ type PurchaseRecord = {
   fornecedor: string
   nota: string
   data: string
-  situacao: string
+  situacao?: 'Concluida' | 'Rascunho'
   itens: PurchaseItem[]
   total: number
-  status?: 'Concluida' | 'Rascunho'
+  registro?: PurchaseTab
+}
+type SaleItem = { produtoId: string; quantidade: number; valor: number }
+type SaleRecord = {
+  id: string
+  cliente: string
+  vendedor: string
+  data: string
+  tipo: string
+  registro?: SalesTab
+  itens: SaleItem[]
+  total: number
+  situacao?: 'Concluida' | 'Rascunho'
+}
+type ContactItem = {
+  id: string
+  nome: string
+  fones?: string
+  palavras?: string
+  cidade?: string
+  tipo: ContactTab
+  observacoes?: string
+  documentos?: string[]
+  camposExtras?: string
+}
+type InventoryRecord = {
+  id: string
+  produtoId: string
+  produtoNome: string
+  data: string
+  contado: number
+  registrado: number
+  diferenca: number
+  observacoes?: string
 }
 type ConfigTab = 'geral' | 'plano' | 'caixa' | 'operacoes' | 'formas' | 'usuarios' | 'fiscal' | 'impressao'
 type Page = 'Dashboard' | 'Financeiro' | 'Vendas' | 'Compras' | 'Clientes' | 'Produtos' | 'Relatorios' | 'Configuracoes'
@@ -175,6 +210,37 @@ export default function App() {
       addEntry(payload)
     }
   }
+
+  const handleReportNavigation = useCallback(
+    (group: string, name: string) => {
+      const lower = name.toLowerCase()
+      if (lower.includes('venda')) {
+        setActivePage('Vendas')
+        setSalesTab('vendas')
+        setShortcutNewSale((n) => n + 1)
+        return
+      }
+      if (lower.includes('compra')) {
+        setActivePage('Compras')
+        setShortcutNewPurchase((n) => n + 1)
+        return
+      }
+      if (lower.includes('financeiro')) {
+        setActivePage('Financeiro')
+        setFinanceTab('recebimentos')
+        return
+      }
+      if (group === 'Produtos') {
+        setActivePage('Produtos')
+        setProductTab('produtos')
+        return
+      }
+      if (group === 'Contatos') {
+        setActivePage('Clientes')
+      }
+    },
+    [setActivePage, setFinanceTab, setProductTab, setSalesTab, setShortcutNewSale, setShortcutNewPurchase],
+  )
 
   // navegacao estilo eGestor: reflete hash da URL para "trocar de pagina"
   useEffect(() => {
@@ -579,7 +645,7 @@ export default function App() {
             />
           )}
           {activePage === 'Compras' && (
-            <ComprasPageNovo
+            <ComprasPage
               activeTab={purchaseTab}
               onFinanceUpsertPurchase={upsertFinanceFromPurchase}
               onFinanceRemovePurchases={(ids) => {
@@ -598,7 +664,7 @@ export default function App() {
           {activePage === 'Produtos' && (
             <ProdutosPage activeTab={productTab} setActiveTab={setProductTab} openNewSignal={shortcutNewProduct} />
           )}
-          {activePage === 'Relatorios' && <RelatoriosPage />}
+          {activePage === 'Relatorios' && <ReportsPanel onNavigate={handleReportNavigation} />}
           {activePage === 'Configuracoes' && <ConfiguracoesPage activeTab={configTab} setActiveTab={setConfigTab} />}
         </main>
       </div>
@@ -1686,18 +1752,6 @@ function FinanceiroPage({
   )
 }
 
-type SaleItem = { produtoId: string; quantidade: number; valor: number }
-type SaleRecord = {
-  id: string
-  cliente: string
-  vendedor: string
-  data: string
-  tipo: string
-  registro?: SalesTab
-  itens: SaleItem[]
-  total: number
-}
-
 function VendasPage({
   activeTab,
   setActiveTab,
@@ -1997,6 +2051,7 @@ function VendasPage({
         onClose={() => setSalesModalOpen(false)}
       >
         <div className="space-y-3">
+          <div className="text-xs text-slate-500 font-semibold">Dados da venda</div>
           <div className="space-y-1">
             <label className="text-xs text-slate-500">Cliente</label>
             <input
@@ -2013,7 +2068,7 @@ function VendasPage({
               onChange={(e) => setSalesForm((p) => ({ ...p, vendedor: e.target.value }))}
             />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid md:grid-cols-3 gap-3">
             <div className="space-y-1">
               <label className="text-xs text-slate-500">Data</label>
               <input
@@ -2032,6 +2087,17 @@ function VendasPage({
               >
                 <option value="Venda">Venda</option>
                 <option value="Devolucao">Devolucao</option>
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-slate-500">Situacao</label>
+              <select
+                className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
+                value={salesForm.situacao || 'Concluida'}
+                onChange={(e) => setSalesForm((p) => ({ ...p, situacao: e.target.value as 'Concluida' | 'Rascunho' }))}
+              >
+                <option value="Concluida">Concluida</option>
+                <option value="Rascunho">Rascunho</option>
               </select>
             </div>
           </div>
@@ -2178,7 +2244,7 @@ function VendasPage({
                   updateSale(salesEditId, payload)
                 }
                 onFinanceUpsertSale(payload)
-                setSalesForm(salesDefaultForm)
+                setSalesForm(buildSalesDefaultForm())
                 setSalesModalOpen(false)
                 setSalesToast('Registro salvo')
               }}
@@ -2252,16 +2318,33 @@ function VendasPage({
             Imprimir
           </button>
         </div>
-        <div className="flex gap-2 items-center">
-          <button
-            className="border border-slate-200 rounded-md px-2 py-1 text-sm text-slate-700 bg-white hover:bg-slate-50"
-            onClick={() => {
-              const now = new Date()
-              setSalesMonth(new Date(now.getFullYear(), now.getMonth(), 1))
-            }}
-          >
-            Mes atual
-          </button>
+          <div className="flex gap-2 items-center">
+            <button
+              className="border border-slate-200 rounded-md px-2 py-1 text-sm text-slate-700 bg-white hover:bg-slate-50"
+              onClick={() => {
+                const now = new Date()
+                setSalesMonth(new Date(now.getFullYear(), now.getMonth(), 1))
+              }}
+            >
+              Mes atual
+            </button>
+            <button
+              className="border border-slate-200 rounded-md px-2 py-1 text-sm text-slate-700 bg-white hover:bg-slate-50"
+              onClick={() => {
+                if (salesSelected.length === 0) {
+                  setSalesToast('Selecione ao menos uma venda para reabrir.')
+                  return
+                }
+                salesSelected.forEach((id) => {
+                  const current = salesItems.find((v) => v.id === id)
+                  if (!current) return
+                  updateSale(id, { ...current, situacao: 'Rascunho' })
+                })
+                setSalesToast('Venda(s) reabertas como rascunho.')
+              }}
+            >
+              Reabrir (rascunho)
+            </button>
           <div className="flex items-center gap-2 border border-slate-200 rounded-md px-2 py-1 text-sm text-slate-700 bg-white">
             <button onClick={() => setSalesMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}>
               {'<'}
@@ -2300,13 +2383,14 @@ function VendasPage({
               <th className="py-3 px-3 text-left">Vendedor</th>
               <th className="py-3 px-3 text-left w-32">Data</th>
               <th className="py-3 px-3 text-left w-32">Tipo</th>
+              <th className="py-3 px-3 text-left w-28">Situacao</th>
               <th className="py-3 px-3 text-right w-32">Total</th>
             </tr>
           </thead>
           <tbody>
             {filteredSales.length === 0 ? (
               <tr className="border-t border-slate-200">
-                <td colSpan={7} className="py-4 px-3 text-center text-slate-500">
+                <td colSpan={8} className="py-4 px-3 text-center text-slate-500">
                   {activeTab === 'vendas' && 'Nenhuma venda encontrada. Veja o mes anterior.'}
                   {activeTab === 'devolucoes' && 'Nenhuma devolucao encontrada. Veja o mes anterior.'}
                 </td>
@@ -2327,12 +2411,23 @@ function VendasPage({
                   <td className="py-3 px-3 text-slate-700">{v.vendedor}</td>
                   <td className="py-3 px-3 text-slate-700">{v.data}</td>
                   <td className="py-3 px-3 text-slate-700">{v.tipo}</td>
+                  <td className="py-3 px-3">
+                    <span
+                      className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                        v.situacao === 'Concluida'
+                          ? 'bg-green-50 text-green-700 border border-green-200'
+                          : 'bg-amber-50 text-amber-700 border border-amber-200'
+                      }`}
+                    >
+                      {v.situacao || 'Concluida'}
+                    </span>
+                  </td>
                   <td className="py-3 px-3 text-right text-slate-700">{formatMoney(v.total)}</td>
                 </tr>
               ))
             )}
             <tr className="bg-slate-50 border-t border-slate-200 font-semibold text-slate-700">
-              <td className="py-3 px-3" colSpan={6}>
+              <td className="py-3 px-3" colSpan={7}>
                 TOTAL LISTADO ({filteredSales.length} itens)
               </td>
               <td className="py-3 px-3 text-right">
@@ -2346,440 +2441,7 @@ function VendasPage({
   )
 }
 
-/* eslint-disable @typescript-eslint/no-unused-vars */
-function ComprasPage({ activeTab, setActiveTab }: { activeTab: PurchaseTab; setActiveTab: (t: PurchaseTab) => void }) {
-  const [purchaseSearch, setPurchaseSearch] = useState('')
-  const [purchaseMonth, setPurchaseMonth] = useState(() => {
-    const now = new Date()
-    return new Date(now.getFullYear(), now.getMonth(), 1)
-  })
-  const [purchaseSelected, setPurchaseSelected] = useState<string[]>([])
-  const [purchaseToast, setPurchaseToast] = useState<string | null>(null)
-  const [purchaseModalOpen, setPurchaseModalOpen] = useState(false)
-  const [purchaseModalMode, setPurchaseModalMode] = useState<'new' | 'edit'>('new')
-  const purchaseDefaultForm = {
-    fornecedor: '',
-    nota: '',
-    data: new Date().toISOString().slice(0, 10),
-    situacao: 'Pendente',
-    total: 0,
-  }
-  const [purchaseForm, setPurchaseForm] = useState(purchaseDefaultForm)
-  const [purchaseEditId, setPurchaseEditId] = useState<string | null>(null)
-
-  const { items: compras, add: addCompra, update: updateCompra, remove: removeCompra } = useLocalCrud('erp.compras', [
-    {
-      id: 'C001',
-      fornecedor: 'Fornecedor XPTO',
-      nota: 'NF 123',
-      data: '2025-11-03',
-      situacao: 'Pendente',
-      total: 450.0,
-    },
-    {
-      id: 'C002',
-      fornecedor: 'Loja do Joao',
-      nota: 'NF 124',
-      data: '2025-11-14',
-      situacao: 'Concluida',
-      total: 980.0,
-    },
-  ])
-
-  const purchaseTerm = purchaseSearch.trim().toLowerCase()
-
-  const filteredPurchases = compras.filter((c) => {
-    const d = new Date(c.data)
-    const sameMonth =
-      !isNaN(d.getTime()) && d.getMonth() === purchaseMonth.getMonth() && d.getFullYear() === purchaseMonth.getFullYear()
-    if (!sameMonth) return false
-    if (!purchaseTerm) return true
-    const hay = [c.id, c.fornecedor, c.nota, c.situacao].join(' ').toLowerCase()
-    return hay.includes(purchaseTerm)
-  })
-
-  const togglePurchase = (id: string) => {
-    setPurchaseSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
-  }
-
-  const togglePurchaseAll = () => {
-    if (filteredPurchases.length === 0) return
-    const ids = filteredPurchases.map((c) => c.id)
-    const all = ids.every((id) => purchaseSelected.includes(id))
-    setPurchaseSelected(all ? [] : ids)
-  }
-
-  const handlePurchaseNew = () => {
-    setPurchaseModalMode('new')
-    setPurchaseEditId(null)
-    setPurchaseForm({
-      fornecedor: '',
-      nota: '',
-      data: new Date().toISOString().slice(0, 10),
-      situacao: 'Pendente',
-      total: 0,
-    })
-    setPurchaseModalOpen(true)
-  }
-
-  const handlePurchaseEdit = () => {
-    if (purchaseSelected.length !== 1) {
-      setPurchaseToast('Selecione apenas um registro para editar.')
-      return
-    }
-    const current = compras.find((c) => c.id === purchaseSelected[0])
-    if (!current) return
-    setPurchaseModalMode('edit')
-    setPurchaseEditId(current.id)
-    setPurchaseForm({
-      fornecedor: current.fornecedor,
-      nota: current.nota,
-      data: current.data,
-      situacao: current.situacao,
-      total: current.total,
-    })
-    setPurchaseModalOpen(true)
-  }
-
-  const handlePurchaseDuplicate = () => {
-    if (purchaseSelected.length === 0) {
-      setPurchaseToast('Selecione ao menos um registro para duplicar.')
-      return
-    }
-    purchaseSelected.forEach((id) => {
-      const current = compras.find((c) => c.id === id)
-      if (current) {
-        addCompra({ ...current, id: crypto.randomUUID() })
-      }
-    })
-  }
-
-  const handlePurchaseDelete = () => {
-    if (purchaseSelected.length === 0) {
-      setPurchaseToast('Selecione ao menos um registro para excluir.')
-      return
-    }
-    removeCompra(purchaseSelected)
-    setPurchaseSelected([])
-  }
-/* eslint-enable @typescript-eslint/no-unused-vars */
-
-  const handlePurchaseExport = () => {
-    if (filteredPurchases.length === 0) {
-      setPurchaseToast('Nada para exportar.')
-      return
-    }
-    const header = ['Cod', 'Fornecedor', 'Nota', 'Data', 'Situacao', 'Total']
-    const rows = filteredPurchases.map((c) => [c.id, c.fornecedor, c.nota, c.data, c.situacao, c.total])
-    const csv = [header, ...rows]
-      .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(';'))
-      .join('\n')
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'compras.csv'
-    a.click()
-    URL.revokeObjectURL(url)
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const handlePurchasePrint = () => {
-    if (purchaseSelected.length === 0) {
-      setPurchaseToast('Selecione ao menos um registro para imprimir.')
-      return
-    }
-    const registros = compras.filter((c) => purchaseSelected.includes(c.id))
-    if (registros.length === 0) return
-    const rows = registros
-      .map(
-        (c) =>
-          `<h4 style="margin:4px 0;">Compra ${c.id}</h4>
-          <div style="font-size:12px;margin-bottom:4px;">Fornecedor: ${c.fornecedor || '-'} | Nota: ${c.nota || '-'} | Data: ${
-            c.data
-          } | Situacao: ${c.situacao}</div>
-          <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:8px;">
-            <thead><tr><th style="border:1px solid #ccc;padding:4px;">Produto</th><th style="border:1px solid #ccc;padding:4px;">Qtd</th><th style="border:1px solid #ccc;padding:4px;">Valor</th><th style="border:1px solid #ccc;padding:4px;">Subtotal</th></tr></thead>
-            <tbody>
-            ${
-              c.itens
-                ?.map((i) => {
-                  const prod = produtosStock.find((p) => p.id === i.produtoId)
-                  const nome = prod?.nome || i.produtoId || '-'
-                  const subtotal = (i.quantidade || 0) * (i.valor || 0)
-                  return `<tr><td style="border:1px solid #ccc;padding:4px;">${nome}</td><td style="border:1px solid #ccc;padding:4px;">${
-                    i.quantidade || 0
-                  }</td><td style="border:1px solid #ccc;padding:4px;">${formatMoney(i.valor || 0)}</td><td style="border:1px solid #ccc;padding:4px;">${formatMoney(
-                    subtotal,
-                  )}</td></tr>`
-                })
-                .join('') || ''
-            }
-            <tr><td colspan="3" style="text-align:right;border:1px solid #ccc;padding:4px;font-weight:bold">Total</td><td style="border:1px solid #ccc;padding:4px;font-weight:bold;">${formatMoney(
-              c.total,
-            )}</td></tr>
-            </tbody>
-          </table>`,
-      )
-      .join('<hr/>')
-    const html = `<html><head><title>Comprovante de compra</title></head><body style="font-family:Arial,sans-serif;padding:16px;">${rows}</body></html>`
-    const w = window.open('', '_blank')
-    if (!w) return
-    w.document.write(html)
-    w.document.close()
-    w.focus()
-    w.print()
-  }
-
-  return (
-    <section className="bg-white rounded-xl p-4 shadow-sm border border-slate-200 space-y-4">
-      <Toast message={purchaseToast} onClose={() => setPurchaseToast(null)} />
-      <Modal
-        open={purchaseModalOpen}
-        title={purchaseModalMode === 'new' ? 'Nova compra' : 'Editar compra'}
-        onClose={() => setPurchaseModalOpen(false)}
-      >
-        <div className="space-y-3">
-          <div className="space-y-1">
-            <label className="text-xs text-slate-500">Fornecedor</label>
-            <input
-              className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
-              value={purchaseForm.fornecedor}
-              onChange={(e) => setPurchaseForm((p) => ({ ...p, fornecedor: e.target.value }))}
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <label className="text-xs text-slate-500">Nota</label>
-              <input
-                className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
-                value={purchaseForm.nota}
-                onChange={(e) => setPurchaseForm((p) => ({ ...p, nota: e.target.value }))}
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs text-slate-500">Data</label>
-              <input
-                type="date"
-                className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
-                value={purchaseForm.data}
-                onChange={(e) => setPurchaseForm((p) => ({ ...p, data: e.target.value }))}
-              />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <label className="text-xs text-slate-500">Situacao</label>
-              <input
-                className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
-                value={purchaseForm.situacao}
-                onChange={(e) => setPurchaseForm((p) => ({ ...p, situacao: e.target.value }))}
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs text-slate-500">Total</label>
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-slate-500">R$</span>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  inputMode="decimal"
-                  className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
-                  value={purchaseForm.total}
-                  onChange={(e) =>
-                    setPurchaseForm((p) => ({ ...p, total: parseFloat(e.target.value || '0') }))
-                  }
-                />
-              </div>
-            </div>
-          </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <button className="border border-slate-200 px-3 py-2 rounded-md text-sm text-slate-700" onClick={() => setPurchaseModalOpen(false)}>
-              Cancelar
-            </button>
-            <button
-              className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-md text-sm font-semibold"
-              onClick={() => {
-                if (!purchaseForm.fornecedor.trim()) {
-                  setPurchaseToast('Fornecedor obrigatorio')
-                  return
-                }
-                if (!purchaseForm.data) {
-                  setPurchaseToast('Data obrigatoria')
-                  return
-                }
-                if (Number.isNaN(purchaseForm.total)) {
-                  setPurchaseToast('Total invalido')
-                  return
-                }
-                const totalNorm = normalizeMoney(purchaseForm.total)
-                if (purchaseModalMode === 'new') {
-                  addCompra({ ...purchaseForm, total: totalNorm })
-                } else if (purchaseEditId) {
-                  updateCompra(purchaseEditId, { ...purchaseForm, total: totalNorm })
-                }
-                setPurchaseForm(purchaseDefaultForm)
-                setPurchaseModalOpen(false)
-                setPurchaseToast('Registro salvo')
-              }}
-            >
-              Salvar
-            </button>
-          </div>
-        </div>
-      </Modal>
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-semibold text-[#0f3047]">Compras</h2>
-          <p className="text-sm text-slate-500">Pedidos de compra em uma tela dedicada.</p>
-        </div>
-        <div className="flex gap-2">
-          {[
-            { id: 'compras', label: 'Compras' },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as PurchaseTab)}
-              className={`px-3 py-1.5 rounded-full border text-sm font-semibold transition ${
-                activeTab === tab.id
-                  ? 'bg-amber-100 border-amber-300 text-[#0f3047]'
-                  : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex gap-2">
-          <button
-            onClick={handlePurchaseNew}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold px-3 py-2 rounded-md transition"
-          >
-            Nova
-          </button>
-          <button
-            onClick={handlePurchaseEdit}
-            className="border border-slate-200 px-3 py-2 rounded-md text-sm text-slate-600"
-          >
-            Editar
-          </button>
-          <button
-            onClick={handlePurchaseDuplicate}
-            className="border border-slate-200 px-3 py-2 rounded-md text-sm text-slate-600"
-          >
-            Duplicar
-          </button>
-          <button
-            onClick={handlePurchaseDelete}
-            className="border border-slate-200 px-3 py-2 rounded-md text-sm text-slate-600"
-          >
-            Excluir
-          </button>
-          <button
-            onClick={handlePurchaseExport}
-            className="border border-slate-200 px-3 py-2 rounded-md text-sm text-slate-600"
-          >
-            Exportar
-          </button>
-        </div>
-        <div className="flex gap-2 items-center">
-          <button
-            className="border border-slate-200 rounded-md px-2 py-1 text-sm text-slate-700 bg-white hover:bg-slate-50"
-            onClick={() => {
-              const now = new Date()
-              setPurchaseMonth(new Date(now.getFullYear(), now.getMonth(), 1))
-            }}
-          >
-            Mes atual
-          </button>
-          <div className="flex items-center gap-2 border border-slate-200 rounded-md px-2 py-1 text-sm text-slate-700 bg-white">
-            <button onClick={() => setPurchaseMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}>
-              {'<'}
-            </button>
-            <span className="capitalize">{formatMonthLabel(purchaseMonth)}</span>
-            <button onClick={() => setPurchaseMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}>
-              {'>'}
-            </button>
-          </div>
-          <input
-            value={purchaseSearch}
-            onChange={(e) => setPurchaseSearch(e.target.value)}
-            className="border border-slate-200 rounded-md px-3 py-2 text-sm text-slate-700 w-48"
-            placeholder="Buscar..."
-          />
-          <button className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-md text-sm font-semibold transition">
-            Buscar
-          </button>
-        </div>
-      </div>
-
-      <div className="overflow-hidden border border-slate-200 rounded-lg">
-        <table className="w-full border-collapse text-sm">
-          <thead className="bg-slate-50 text-slate-600">
-            <tr>
-              <th className="py-3 px-3 text-left w-10">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 accent-emerald-600"
-                  onChange={togglePurchaseAll}
-                  checked={filteredPurchases.length > 0 && filteredPurchases.every((c) => purchaseSelected.includes(c.id))}
-                />
-              </th>
-              <th className="py-3 px-3 text-left w-20">Cod</th>
-              <th className="py-3 px-3 text-left">Fornecedor</th>
-              <th className="py-3 px-3 text-left">Nota</th>
-              <th className="py-3 px-3 text-left w-32">Data</th>
-              <th className="py-3 px-3 text-left w-32">Situacao</th>
-              <th className="py-3 px-3 text-right w-32">Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredPurchases.length === 0 ? (
-              <tr className="border-t border-slate-200">
-                <td colSpan={7} className="py-4 px-3 text-center text-slate-500">
-                  Nenhuma compra encontrada. Veja o mes anterior.
-                </td>
-              </tr>
-            ) : (
-              filteredPurchases.map((c) => (
-                <tr key={c.id} className="border-t border-slate-200">
-                  <td className="py-3 px-3 text-slate-700">
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4 accent-emerald-600"
-                      checked={purchaseSelected.includes(c.id)}
-                      onChange={() => togglePurchase(c.id)}
-                    />
-                  </td>
-                  <td className="py-3 px-3 text-slate-700">{c.id}</td>
-                  <td className="py-3 px-3 text-slate-700">{c.fornecedor}</td>
-                  <td className="py-3 px-3 text-slate-700">{c.nota}</td>
-                  <td className="py-3 px-3 text-slate-700">{c.data}</td>
-                  <td className="py-3 px-3 text-slate-700">{c.situacao}</td>
-                  <td className="py-3 px-3 text-right text-slate-700">{formatMoney(c.total)}</td>
-                </tr>
-              ))
-            )}
-            <tr className="bg-slate-50 border-t border-slate-200 font-semibold text-slate-700">
-              <td className="py-3 px-3" colSpan={6}>
-                TOTAL LISTADO ({filteredPurchases.length} itens)
-              </td>
-              <td className="py-3 px-3 text-right">
-                {formatMoney(filteredPurchases.reduce((acc, c) => acc + c.total, 0))}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-  )
-}
-
-function ComprasPageNovo({
+function ComprasPage({
   activeTab,
   onFinanceUpsertPurchase,
   onFinanceRemovePurchases,
@@ -2804,7 +2466,7 @@ function ComprasPageNovo({
       fornecedor: '',
       nota: '',
       data: new Date().toISOString().slice(0, 10),
-      situacao: 'Pendente',
+      situacao: 'Concluida' as 'Concluida' | 'Rascunho',
       itens: [{ produtoId: '', quantidade: 1, valor: 0 }],
       total: 0,
     }),
@@ -2819,7 +2481,7 @@ function ComprasPageNovo({
       fornecedor: 'Fornec Uno',
       nota: 'NF123',
       data: '2025-11-03',
-      situacao: 'Pendente',
+      situacao: 'Concluida',
       total: 350.5,
       itens: [{ produtoId: 'P002', quantidade: 5, valor: 70 }],
       registro: 'compras' as PurchaseTab,
@@ -2905,7 +2567,7 @@ function ComprasPageNovo({
       fornecedor: current.fornecedor,
       nota: current.nota,
       data: current.data,
-      situacao: current.situacao,
+      situacao: current.situacao || 'Concluida',
       itens:
         current.itens?.map((i: PurchaseItem) => ({
           produtoId: i.produtoId || '',
@@ -2972,6 +2634,79 @@ function ComprasPageNovo({
     setPurchaseSelected([])
   }
 
+  const handlePurchaseExport = () => {
+    if (filteredPurchases.length === 0) {
+      setPurchaseToast('Nada para exportar.')
+      return
+    }
+    const header = ['Cod', 'Fornecedor', 'Nota', 'Data', 'Situacao', 'Total']
+    const rows = filteredPurchases.map((c) => [
+      c.id,
+      c.fornecedor,
+      c.nota,
+      c.data,
+      c.situacao || 'Concluida',
+      formatMoney(c.total || 0),
+    ])
+    const csv = [header, ...rows]
+      .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(';'))
+      .join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'compras.csv'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handlePurchasePrint = () => {
+    if (purchaseSelected.length === 0) {
+      setPurchaseToast('Selecione ao menos um registro para imprimir.')
+      return
+    }
+    const registros = compras.filter((c) => purchaseSelected.includes(c.id))
+    if (registros.length === 0) return
+    const rows = registros
+      .map(
+        (c) =>
+          `<h4 style="margin:4px 0;">Compra ${c.id}</h4>
+          <div style="font-size:12px;margin-bottom:4px;">Fornecedor: ${c.fornecedor || '-'} | Nota: ${c.nota || '-'} | Data: ${
+            c.data
+          } | Situacao: ${c.situacao || 'Concluida'}</div>
+          <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:8px;">
+            <thead><tr><th style="border:1px solid #ccc;padding:4px;">Produto</th><th style="border:1px solid #ccc;padding:4px;">Qtd</th><th style="border:1px solid #ccc;padding:4px;">Valor</th><th style="border:1px solid #ccc;padding:4px;">Subtotal</th></tr></thead>
+            <tbody>
+            ${
+              (c.itens || [])
+                .map((i) => {
+                  const prod = produtosStock.find((p) => p.id === i.produtoId)
+                  const nome = prod?.nome || i.produtoId || '-'
+                  const subtotal = (i.quantidade || 0) * (i.valor || 0)
+                  return `<tr><td style="border:1px solid #ccc;padding:4px;">${nome}</td><td style="border:1px solid #ccc;padding:4px;">${
+                    i.quantidade || 0
+                  }</td><td style="border:1px solid #ccc;padding:4px;">${formatMoney(i.valor || 0)}</td><td style="border:1px solid #ccc;padding:4px;">${formatMoney(
+                    subtotal,
+                  )}</td></tr>`
+                })
+                .join('') || ''
+            }
+            <tr><td colspan="3" style="text-align:right;border:1px solid #ccc;padding:4px;font-weight:bold">Total</td><td style="border:1px solid #ccc;padding:4px;font-weight:bold;">${formatMoney(
+              c.total,
+            )}</td></tr>
+            </tbody>
+          </table>`,
+      )
+      .join('<hr/>')
+    const html = `<html><head><title>Comprovante de compra</title></head><body style="font-family:Arial,sans-serif;padding:16px;">${rows}</body></html>`
+    const w = window.open('', '_blank')
+    if (!w) return
+    w.document.write(html)
+    w.document.close()
+    w.focus()
+    w.print()
+  }
+
   const computeTotal = (itens: PurchaseItem[]) =>
     (itens || []).reduce((acc, item) => acc + (Number(item.quantidade) || 0) * (Number(item.valor) || 0), 0)
 
@@ -3017,10 +2752,10 @@ function ComprasPageNovo({
               <select
                 className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
                 value={purchaseForm.situacao}
-                onChange={(e) => setPurchaseForm((p) => ({ ...p, situacao: e.target.value }))}
+                onChange={(e) => setPurchaseForm((p) => ({ ...p, situacao: e.target.value as 'Concluida' | 'Rascunho' }))}
               >
-                <option value="Pendente">Pendente</option>
                 <option value="Concluida">Concluida</option>
+                <option value="Rascunho">Rascunho</option>
               </select>
             </div>
           </div>
@@ -3166,7 +2901,7 @@ function ComprasPageNovo({
                   updateCompra(purchaseEditId, payload)
                 }
                 onFinanceUpsertPurchase(payload)
-                setPurchaseForm(purchaseDefaultForm)
+                setPurchaseForm(buildPurchaseDefaultForm())
                 setPurchaseModalOpen(false)
                 setPurchaseSelected([])
               }}
@@ -3342,13 +3077,53 @@ function ClientesPage({
 
   const [contactSelected, setContactSelected] = useState<string[]>([])
 
-  const { items: contatos, add: addContato, update: updateContato, remove: removeContato } = useLocalCrud(
+  const { items: contatos, add: addContato, update: updateContato, remove: removeContato } = useLocalCrud<ContactItem>(
     'erp.contatos',
     [
-      { id: 'C001', nome: 'Cliente ACME', fones: '(11) 9999-0000', palavras: 'vip', cidade: 'SP/SP', tipo: 'clientes' },
-      { id: 'C002', nome: 'Cliente Beta', fones: '(21) 9888-1111', palavras: 'atacado', cidade: 'RJ/RJ', tipo: 'clientes' },
-      { id: 'F001', nome: 'Fornecedor XPTO', fones: '(31) 9777-2222', palavras: 'eletronicos', cidade: 'BH/MG', tipo: 'fornecedores' },
-      { id: 'T001', nome: 'Transp Sul', fones: '(41) 9666-3333', palavras: 'rodoviario', cidade: 'CTBA/PR', tipo: 'transportadoras' },
+      {
+        id: 'C001',
+        nome: 'Cliente ACME',
+        fones: '(11) 9999-0000',
+        palavras: 'vip',
+        cidade: 'SP/SP',
+        tipo: 'clientes',
+        observacoes: '',
+        documentos: [],
+        camposExtras: '',
+      },
+      {
+        id: 'C002',
+        nome: 'Cliente Beta',
+        fones: '(21) 9888-1111',
+        palavras: 'atacado',
+        cidade: 'RJ/RJ',
+        tipo: 'clientes',
+        observacoes: '',
+        documentos: [],
+        camposExtras: '',
+      },
+      {
+        id: 'F001',
+        nome: 'Fornecedor XPTO',
+        fones: '(31) 9777-2222',
+        palavras: 'eletronicos',
+        cidade: 'BH/MG',
+        tipo: 'fornecedores',
+        observacoes: '',
+        documentos: [],
+        camposExtras: '',
+      },
+      {
+        id: 'T001',
+        nome: 'Transp Sul',
+        fones: '(41) 9666-3333',
+        palavras: 'rodoviario',
+        cidade: 'CTBA/PR',
+        tipo: 'transportadoras',
+        observacoes: '',
+        documentos: [],
+        camposExtras: '',
+      },
     ],
   )
 
@@ -3396,10 +3171,10 @@ function ClientesPage({
     setContactModalMode('edit')
     setContactEditId(current.id)
     setContactForm({
-      nome: current.nome,
-      fones: current.fones,
-      palavras: current.palavras,
-      cidade: current.cidade,
+      nome: current.nome || '',
+      fones: current.fones || '',
+      palavras: current.palavras || '',
+      cidade: current.cidade || '',
       observacoes: current.observacoes || '',
       documentos: current.documentos || [],
       camposExtras: current.camposExtras || '',
@@ -3738,26 +3513,42 @@ function ProdutosPage({
   const [productToast, setProductToast] = useState<string | null>(null)
   const [productModalOpen, setProductModalOpen] = useState(false)
   const [productModalMode, setProductModalMode] = useState<'new' | 'edit'>('new')
-  const productDefaultForm = {
-    nome: '',
-    categoria: '',
-    preco: 0,
-    estoque: 0,
-    estoqueMinimo: 0,
-    palavras: '',
-    contato: '',
-    observacoes: '',
-    data: new Date().toISOString().slice(0, 10),
-    documentos: [] as string[],
-    camposExtras: '',
-    produtoId: '',
-    quantidade: 0,
-    movimento: [],
-  }
-  const [productForm, setProductForm] = useState(productDefaultForm)
+  const [movementModalOpen, setMovementModalOpen] = useState(false)
+  const [movementProduct, setMovementProduct] = useState<ProductItem | null>(null)
+  const [movementData, setMovementData] = useState<
+    { data: string; tipo: string; quantidade: number; origem: string; contato?: string }[]
+  >([])
+  const [inventoryModalOpen, setInventoryModalOpen] = useState(false)
+  const [inventoryProduct, setInventoryProduct] = useState<ProductItem | null>(null)
+  const [inventoryCount, setInventoryCount] = useState(0)
+  const [inventoryObs, setInventoryObs] = useState('')
+  const buildProductDefaultForm = useCallback(
+    () => ({
+      nome: '',
+      categoria: '',
+      preco: 0,
+      estoque: 0,
+      estoqueMinimo: 0,
+      palavras: '',
+      contato: '',
+      observacoes: '',
+      data: new Date().toISOString().slice(0, 10),
+      documentos: [] as string[],
+      camposExtras: '',
+      produtoId: '',
+      quantidade: 0,
+      movimento: [] as ProductItem['movimento'],
+    }),
+    [],
+  )
+  const [productForm, setProductForm] = useState(buildProductDefaultForm)
   const [productEditId, setProductEditId] = useState<string | null>(null)
 
-  const { items: produtos, add: addProduto, update: updateProduto, remove: removeProduto } = useLocalCrud('erp.produtos', produtosSeed)
+  const { items: produtos, add: addProduto, update: updateProduto, remove: removeProduto, setItems: setProdutos } = useLocalCrud(
+    'erp.produtos',
+    produtosSeed,
+  )
+  const { items: inventoryRecords, add: addInventoryRecord } = useLocalCrud<InventoryRecord>('erp.inventory', [])
 
   const prodTerm = productSearch.trim().toLowerCase()
   const filteredProdutos = produtos.filter((p) => {
@@ -3786,19 +3577,152 @@ function ProdutosPage({
   const movimentosRecentes = useMemo(() => {
     const trintaDiasAtras = new Date()
     trintaDiasAtras.setDate(trintaDiasAtras.getDate() - 30)
-    const vendas = salesItems.filter((v) => new Date(v.data) >= trintaDiasAtras)
-    const comprasMov = compras.filter((c) => new Date(c.data) >= trintaDiasAtras)
+    const parseStorage = <T,>(key: string): T[] => {
+      try {
+        const raw = localStorage.getItem(key)
+        if (raw) {
+          const arr = JSON.parse(raw)
+          if (Array.isArray(arr)) return arr as T[]
+        }
+      } catch {
+        //
+      }
+      return []
+    }
+    const vendas = parseStorage<SaleRecord>('erp.sales')
+    const comprasMov = parseStorage<PurchaseRecord>('erp.compras')
     const mapa = new Set<string>()
     vendas.forEach((v) => v.itens?.forEach((i) => mapa.add(i.produtoId)))
     comprasMov.forEach((c) => c.itens?.forEach((i) => mapa.add(i.produtoId)))
     return mapa
-  }, []) // salesItems/compras são da mesma renderização; mantemos memo simples
-
+  }, [])
   const alertasEstoque = useMemo(() => {
     const baixo = filteredProdutos.filter((p) => (p.estoqueMinimo || 0) > 0 && p.estoque <= (p.estoqueMinimo || 0))
     const semMov = filteredProdutos.filter((p) => !movimentosRecentes.has(p.id))
     return { baixo, semMov }
   }, [filteredProdutos, movimentosRecentes])
+
+  const abrirMovimentacao = (produto: ProductItem) => {
+    const parse = <T,>(key: string): T[] => {
+      try {
+        const raw = localStorage.getItem(key)
+        if (raw) {
+          const arr = JSON.parse(raw)
+          if (Array.isArray(arr)) return arr as T[]
+        }
+      } catch {
+        return []
+      }
+      return []
+    }
+    const vendas = parse<SaleRecord>('erp.sales')
+    const comprasMov = parse<PurchaseRecord>('erp.compras')
+    const movimentos: { data: string; tipo: string; quantidade: number; origem: string; contato?: string }[] = []
+
+    vendas.forEach((v) => {
+      v.itens?.forEach((i) => {
+        if (i.produtoId === produto.id) {
+          const mult = v.registro === 'devolucoes' ? 1 : -1
+          movimentos.push({
+            data: v.data,
+            tipo: v.registro === 'devolucoes' ? 'Devolucao' : 'Venda',
+            quantidade: mult * (i.quantidade || 0),
+            origem: v.id,
+            contato: v.cliente,
+          })
+        }
+      })
+    })
+    comprasMov.forEach((c) => {
+      c.itens?.forEach((i) => {
+        if (i.produtoId === produto.id) {
+          movimentos.push({
+            data: c.data,
+            tipo: 'Compra',
+            quantidade: i.quantidade || 0,
+            origem: c.id,
+            contato: c.fornecedor,
+          })
+        }
+      })
+    })
+    ;(produto.movimento || []).forEach((m) => {
+      movimentos.push({
+        data: m.data,
+        tipo: m.tipo === 'ajuste' ? 'Ajuste' : m.tipo,
+        quantidade: m.quantidade,
+        origem: 'ajuste',
+      })
+    })
+    const ordenado = movimentos.sort((a, b) => a.data.localeCompare(b.data))
+    setMovementProduct(produto)
+    setMovementData(ordenado)
+    setMovementModalOpen(true)
+  }
+
+  const openInventoryModal = (produto?: ProductItem) => {
+    const target =
+      produto || (productSelected.length === 1 ? produtos.find((p) => p.id === productSelected[0]) : null)
+    if (!target) {
+      setProductToast('Selecione um produto para registrar o inventario.')
+      return
+    }
+    setInventoryProduct(target)
+    setInventoryCount(target.estoque || 0)
+    setInventoryObs('')
+    setInventoryModalOpen(true)
+  }
+
+  const handleInventorySave = () => {
+    if (!inventoryProduct) return
+    const registrado = inventoryProduct.estoque || 0
+    const diferenca = inventoryCount - registrado
+    updateProduto(inventoryProduct.id, { ...inventoryProduct, estoque: inventoryCount })
+    addInventoryRecord({
+      id: crypto.randomUUID(),
+      produtoId: inventoryProduct.id,
+      produtoNome: inventoryProduct.nome,
+      data: new Date().toISOString().slice(0, 10),
+      contado: inventoryCount,
+      registrado,
+      diferenca,
+      observacoes: inventoryObs.trim() || undefined,
+    })
+    setInventoryModalOpen(false)
+    setProductToast('Inventario registrado e estoque atualizado.')
+  }
+
+  const exportMovements = () => {
+    if (!movementProduct || movementData.length === 0) {
+      setProductToast('Nada para exportar.')
+      return
+    }
+    const header = ['Data', 'Tipo', 'Quantidade', 'Origem', 'Contato']
+    const rows = movementData.map((m) => [m.data, m.tipo, m.quantidade, m.origem, m.contato || '-'])
+    const csv = [header, ...rows]
+      .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(';'))
+      .join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `movimentacao_${movementProduct.id}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleOpenMovement = () => {
+    if (productSelected.length !== 1) {
+      setProductToast('Selecione um unico produto para ver a movimentacao.')
+      return
+    }
+    const prod = produtos.find((p) => p.id === productSelected[0])
+    if (!prod) {
+      setProductToast('Produto nao encontrado.')
+      return
+    }
+    abrirMovimentacao(prod)
+  }
 
   const toggleProduto = (id: string) => {
     setProductSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
@@ -3813,21 +3737,9 @@ function ProdutosPage({
   const handleProdutoNew = useCallback(() => {
     setProductModalMode('new')
     setProductEditId(null)
-    setProductForm({
-      nome: '',
-      categoria: '',
-      preco: 0,
-      estoque: 0,
-      estoqueMinimo: 0,
-      palavras: '',
-      contato: '',
-      observacoes: '',
-      data: new Date().toISOString().slice(0, 10),
-      produtoId: '',
-      quantidade: 0,
-    })
+    setProductForm(buildProductDefaultForm())
     setProductModalOpen(true)
-  }, [])
+  }, [buildProductDefaultForm])
 
   const productNewRef = useRef(0)
   useEffect(() => {
@@ -4158,12 +4070,138 @@ function ProdutosPage({
                 } else if (productEditId) {
                   updateProduto(productEditId, { ...productForm, preco: precoNorm, estoque: estoqueNorm })
                 }
-                setProductForm(productDefaultForm)
+                setProductForm(buildProductDefaultForm())
                 setProductModalOpen(false)
                 setProductToast('Registro salvo')
               }}
             >
               Salvar
+            </button>
+          </div>
+        </div>
+      </Modal>
+      <Modal
+        open={movementModalOpen}
+        title={`Movimentacao - ${movementProduct ? `${movementProduct.id} · ${movementProduct.nome}` : ''}`}
+        onClose={() => setMovementModalOpen(false)}
+      >
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-sm text-slate-600">
+            {movementProduct
+              ? `Entradas/saidas deste produto (vendas, compras e ajustes).`
+              : 'Selecione um produto para ver a movimentacao.'}
+          </div>
+          <button
+            onClick={exportMovements}
+            className="border border-slate-200 px-3 py-2 rounded-md text-sm text-slate-600 hover:bg-slate-50"
+          >
+            Exportar CSV
+          </button>
+        </div>
+        <div className="overflow-hidden border border-slate-200 rounded-lg">
+          <table className="w-full border-collapse text-sm">
+            <thead className="bg-slate-50 text-slate-600">
+              <tr>
+                <th className="py-2 px-3 text-left w-28">Data</th>
+                <th className="py-2 px-3 text-left">Tipo</th>
+                <th className="py-2 px-3 text-left">Origem</th>
+                <th className="py-2 px-3 text-right w-20">Qtd</th>
+                <th className="py-2 px-3 text-left">Contato</th>
+              </tr>
+            </thead>
+            <tbody>
+              {movementData.length === 0 ? (
+                <tr className="border-t border-slate-200">
+                  <td className="py-3 px-3 text-center text-slate-500" colSpan={5}>
+                    Nenhuma movimentacao encontrada.
+                  </td>
+                </tr>
+              ) : (
+                movementData.map((m, idx) => (
+                  <tr key={`${m.origem}-${idx}`} className="border-t border-slate-200">
+                    <td className="py-2 px-3 text-slate-700">{m.data}</td>
+                    <td className="py-2 px-3 text-slate-700">{m.tipo}</td>
+                    <td className="py-2 px-3 text-slate-700">{m.origem}</td>
+                    <td className="py-2 px-3 text-right text-slate-700">{m.quantidade}</td>
+                    <td className="py-2 px-3 text-slate-700">{m.contato || '-'}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Modal>
+      <Modal
+        open={inventoryModalOpen}
+        title={inventoryProduct ? `Inventário · ${inventoryProduct.id}` : 'Inventário'}
+        onClose={() => setInventoryModalOpen(false)}
+      >
+        <div className="space-y-4">
+          <div className="text-sm text-slate-600">
+            Registre a contagem manual e corrija o estoque automaticamente. A diferença será registrada.
+          </div>
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <div className="space-y-1">
+              <label className="text-xs text-slate-500">Produto</label>
+              <div className="px-3 py-2 rounded-md border border-slate-200 bg-slate-50 text-slate-800">
+                {inventoryProduct ? `${inventoryProduct.id} · ${inventoryProduct.nome}` : 'Selecione um produto'}
+              </div>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-slate-500">Data</label>
+              <input
+                type="date"
+                className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
+                value={new Date().toISOString().slice(0, 10)}
+                readOnly
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="text-xs text-slate-500">Estoque registrado</label>
+              <div className="px-3 py-2 rounded-md border border-slate-200 bg-slate-50 text-slate-800">
+                {inventoryProduct ? inventoryProduct.estoque : '-'}
+              </div>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-slate-500">Contagem real</label>
+              <input
+                type="number"
+                min="0"
+                className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
+                value={inventoryCount}
+                onChange={(e) => {
+                  const value = parseInt(e.target.value || '0')
+                  setInventoryCount(Number.isNaN(value) ? 0 : value)
+                }}
+              />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs text-slate-500">Observacoes sobre a contagem</label>
+            <textarea
+              className="w-full border border-slate-200 rounded-md px-3 py-2 text-sm"
+              rows={3}
+              value={inventoryObs}
+              onChange={(e) => setInventoryObs(e.target.value)}
+            />
+          </div>
+          <div className="text-sm text-slate-600">
+            Diferenca:{' '}
+            <span className="font-semibold text-slate-800">
+              {inventoryProduct ? inventoryCount - (inventoryProduct.estoque || 0) : 0}
+            </span>
+          </div>
+          <div className="flex justify-end gap-2">
+            <button className="border border-slate-200 px-3 py-2 rounded-md text-sm text-slate-700" onClick={() => setInventoryModalOpen(false)}>
+              Cancelar
+            </button>
+            <button
+              className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-md text-sm font-semibold"
+              onClick={handleInventorySave}
+            >
+              Registrar inventário
             </button>
           </div>
         </div>
@@ -4310,6 +4348,12 @@ function ProdutosPage({
           >
             Exportar
           </button>
+          <button
+            onClick={handleOpenMovement}
+            className="border border-slate-200 px-3 py-2 rounded-md text-sm text-slate-600"
+          >
+            Movimentacao
+          </button>
         </div>
         <div className="flex gap-2 items-center">
           <input
@@ -4327,6 +4371,28 @@ function ProdutosPage({
       {alertasEstoque.baixo.length > 0 && (
         <div className="border border-amber-200 bg-amber-50 text-amber-900 px-3 py-2 rounded-md text-sm">
           {alertasEstoque.baixo.length} produto(s) abaixo do estoque minimo.
+          <div className="flex flex-wrap gap-2 mt-1">
+            {alertasEstoque.baixo.slice(0, 6).map((p) => (
+              <div key={p.id} className="flex gap-1">
+                <button
+                  onClick={() => {
+                    setActiveTab('produtos')
+                    setProductSearch(p.id)
+                    setProductSelected([p.id])
+                  }}
+                  className="px-2 py-1 bg-white/70 hover:bg-white text-amber-900 border border-amber-200 rounded-md text-xs font-semibold transition"
+                >
+                  {p.id} - {p.nome}
+                </button>
+                <button
+                  onClick={() => openInventoryModal(p)}
+                  className="px-2 py-1 bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-200 rounded-md text-xs font-semibold transition"
+                >
+                  Inventário
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
       {alertasEstoque.semMov.length > 0 && (
@@ -4334,6 +4400,43 @@ function ProdutosPage({
           {alertasEstoque.semMov.length} produto(s) sem movimento nos ultimos 30 dias.
         </div>
       )}
+      <div className="border border-slate-200 bg-white/80 px-3 py-2 rounded-md text-sm shadow-sm">
+        <div className="flex items-center justify-between">
+          <span className="font-semibold text-slate-700">Inventário</span>
+          <button
+            onClick={() => openInventoryModal()}
+            className="text-xs font-semibold text-emerald-600 hover:underline"
+          >
+            Registrar contagem
+          </button>
+        </div>
+        <div className="mt-2 text-slate-600 text-xs">
+          Últimas {Math.min(inventoryRecords.length, 3)} contagens:
+        </div>
+        <ul className="mt-2 space-y-1 text-xs text-slate-700">
+          {inventoryRecords.length === 0 ? (
+            <li className="text-slate-500">Sem registros recentes.</li>
+          ) : (
+            inventoryRecords.slice(-3).reverse().map((rec) => (
+              <li key={rec.id} className="flex items-center justify-between border-b border-slate-100 pb-1">
+                <div>
+                  <strong>{rec.produtoId}</strong> · {rec.produtoNome}
+                  <div className="text-[11px] text-slate-500">
+                    {rec.data} · registrou {rec.registrado} · contou {rec.contado}
+                  </div>
+                </div>
+                <span
+                  className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                    rec.diferenca === 0 ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'
+                  }`}
+                >
+                  {rec.diferenca > 0 ? `+${rec.diferenca}` : rec.diferenca.toString()}
+                </span>
+              </li>
+            ))
+          )}
+        </ul>
+      </div>
 
       {activeTab === 'produtos' && (
         <ProdutosTable
@@ -4369,7 +4472,7 @@ function ProdutosTable({
   onToggle,
   onToggleAll,
 }: {
-  items: { id: string; nome: string; categoria: string; preco: number; estoque: number; estoqueMinimo?: number; documentos?: string[] }[]
+  items: ProductItem[]
   selected: string[]
   onToggle: (id: string) => void
   onToggleAll: () => void
@@ -4445,7 +4548,7 @@ function ServicosTable({
   onToggle,
   onToggleAll,
 }: {
-  items: { id: string; nome: string; palavras: string; preco: number }[]
+  items: ProductItem[]
   selected: string[]
   onToggle: (id: string) => void
   onToggleAll: () => void
@@ -4512,7 +4615,7 @@ function AjusteTable({
   onToggle,
   onToggleAll,
 }: {
-  items: { id: string; motivo: string; contato: string; palavras: string; observacoes: string; data: string; estoque?: number }[]
+  items: ProductItem[]
   selected: string[]
   onToggle: (id: string) => void
   onToggleAll: () => void
@@ -4531,12 +4634,11 @@ function AjusteTable({
               />
             </th>
             <th className="py-3 px-3 text-left w-20">Cod</th>
-            <th className="py-3 px-3 text-left">Motivo</th>
+            <th className="py-3 px-3 text-left">Item</th>
             <th className="py-3 px-3 text-left">Contato</th>
-            <th className="py-3 px-3 text-left">Palavras-chave</th>
             <th className="py-3 px-3 text-left">Observacoes</th>
-            <th className="py-3 px-3 text-left w-32">Data</th>
-            <th className="py-3 px-3 text-left w-20">Qtd</th>
+            <th className="py-3 px-3 text-left w-28">Data</th>
+            <th className="py-3 px-3 text-right w-24">Estoque</th>
           </tr>
         </thead>
         <tbody>
@@ -4558,12 +4660,11 @@ function AjusteTable({
                   />
                 </td>
                 <td className="py-3 px-3 text-slate-700">{a.id}</td>
-                <td className="py-3 px-3 text-slate-700">{a.motivo}</td>
-                <td className="py-3 px-3 text-slate-700">{a.contato}</td>
-                <td className="py-3 px-3 text-slate-700">{a.palavras}</td>
-              <td className="py-3 px-3 text-slate-700">{a.observacoes}</td>
-              <td className="py-3 px-3 text-slate-700">{a.data}</td>
-              <td className="py-3 px-3 text-slate-700">{a.estoque ?? '-'}</td>
+                <td className="py-3 px-3 text-slate-700">{a.nome || 'Ajuste'}</td>
+                <td className="py-3 px-3 text-slate-700">{a.contato || '-'}</td>
+                <td className="py-3 px-3 text-slate-700 text-xs">{a.observacoes || '-'}</td>
+                <td className="py-3 px-3 text-slate-700">{a.data || '-'}</td>
+                <td className="py-3 px-3 text-right text-slate-700">{a.estoque ?? '-'}</td>
               </tr>
             ))
           )}
@@ -5622,194 +5723,5 @@ function ConfigPlano() {
     </div>
   )
 }
-function RelatoriosPage() {
-  const [reportSearch, setReportSearch] = useState('')
-  const [reportSelected, setReportSelected] = useState<string[]>([])
-  const [reportToast, setReportToast] = useState<string | null>(null)
-  const reportGroups = [
-    {
-      title: 'Financeiro',
-      tone: 'bg-green-100 border-green-300 text-green-900',
-      items: [
-        'Extrato financeiro',
-        'Fluxo de caixa periodico',
-        'Fluxo financeiro',
-        'DRE',
-        'Fluxo futuro',
-        'Lancamentos cancelados',
-        'Financeiro por vendedor',
-        'Financeiro por formas pgto',
-        'Comissoes por financeiro',
-        'Conciliacao bancaria',
-        'Boletos',
-        'Recebimentos por cliente',
-      ],
-    },
-    {
-      title: 'Vendas',
-      tone: 'bg-teal-100 border-teal-300 text-teal-900',
-      items: [
-        'Vendas detalhadas',
-        'Detalhes dos produtos vendidos',
-        'Comissoes de vendas',
-        'ABC de produtos vendidos',
-        'ABC de vendas por cliente',
-        'ABC de vendas por vendedor',
-        'Vendas por tipo de documento',
-        'Vendas por categoria/NCM',
-        'Resumo de vendas',
-      ],
-    },
-    {
-      title: 'Compras',
-      tone: 'bg-sky-100 border-sky-300 text-sky-900',
-      items: [
-        'Compras detalhadas',
-        'Sugestao de compra',
-        'Detalhes dos produtos comprados',
-        'ABC de produtos comprados',
-      ],
-    },
-    {
-      title: 'Produtos',
-      tone: 'bg-emerald-100 border-emerald-300 text-emerald-900',
-      items: [
-        'Estoque minimo',
-        'Estoque em data especifica',
-        'Historico por produto',
-        'Movimentacao de um produto',
-        'Produtos por fornecedor',
-        'Produtos sem vendas',
-        'Ajuste de estoque',
-        'Movimentacao de estoque',
-      ],
-    },
-    {
-      title: 'Contatos',
-      tone: 'bg-blue-100 border-blue-300 text-blue-900',
-      items: [
-        'Historico de um contato',
-        'Personalizado de contatos',
-        'Comemoracoes do mes',
-        'Inatividade de clientes',
-        'Contatos duplicados',
-      ],
-    },
-  ]
 
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(
-    reportGroups.reduce((acc, g) => ({ ...acc, [g.title]: true }), {} as Record<string, boolean>)
-  )
-
-  const flatReports = reportGroups.flatMap((group) =>
-    group.items.map((item) => ({
-      id: `${group.title}-${item}`,
-      nome: item,
-      grupo: group.title,
-    })),
-  )
-
-  const filteredReports = flatReports.filter((r) => {
-    const term = reportSearch.trim().toLowerCase()
-    if (!term) return true
-    return [r.nome, r.grupo].join(' ').toLowerCase().includes(term)
-  })
-
-  const toggleReport = (id: string) => {
-    setReportSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
-  }
-
-  const toggleReportAll = () => {
-    if (filteredReports.length === 0) return
-    const ids = filteredReports.map((r) => r.id)
-    const all = ids.every((id) => reportSelected.includes(id))
-    setReportSelected(all ? [] : ids)
-  }
-
-  const handleReportExport = () => {
-    if (filteredReports.length === 0) {
-      setReportToast('Nada para exportar.')
-      return
-    }
-    const header = ['Grupo', 'Relatorio']
-    const rows = filteredReports.map((r) => [r.grupo, r.nome])
-    const csv = [header, ...rows]
-      .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(';'))
-      .join('\n')
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'relatorios.csv'
-    a.click()
-    URL.revokeObjectURL(url)
-    setReportToast('Exportado com sucesso')
-  }
-
-  const toggleGroup = (title: string) => {
-    setOpenGroups((prev) => ({ ...prev, [title]: !prev[title] }))
-  }
-
-  return (
-    <section className="space-y-4">
-      <Toast message={reportToast} onClose={() => setReportToast(null)} />
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div className="flex-1 min-w-[260px]">
-          <input
-            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700"
-            placeholder="Buscar relatorio"
-            value={reportSearch}
-            onChange={(e) => setReportSearch(e.target.value)}
-          />
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={toggleReportAll}
-            className="border border-slate-200 rounded-md px-3 py-2 text-sm text-slate-700 bg-white hover:bg-slate-50"
-          >
-            {filteredReports.length > 0 && reportSelected.length === filteredReports.length ? 'Limpar selecao' : 'Selecionar todos'}
-          </button>
-          <button
-            onClick={handleReportExport}
-            className="border border-slate-200 rounded-md px-3 py-2 text-sm text-slate-700 bg-white hover:bg-slate-50"
-          >
-            Exportar
-          </button>
-        </div>
-        <span className="text-sm text-slate-500">Escolha uma categoria para ver os relatorios disponiveis.</span>
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        {reportGroups.map((group) => (
-          <div key={group.title} className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-            <button
-              onClick={() => toggleGroup(group.title)}
-              className={`w-full flex items-center justify-between px-4 py-3 border-b font-semibold text-left ${group.tone}`}
-            >
-              <span>{group.title}</span>
-              <span className="text-sm">{openGroups[group.title] ? '-' : '+'}</span>
-            </button>
-            {openGroups[group.title] && (
-              <ul className="divide-y divide-slate-100">
-                {group.items.map((item) => (
-                  <li key={item} className="px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 cursor-pointer">
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 accent-emerald-600"
-                        checked={reportSelected.includes(`${group.title}-${item}`)}
-                        onChange={() => toggleReport(`${group.title}-${item}`)}
-                      />
-                      <span>{item}</span>
-                    </label>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        ))}
-      </div>
-    </section>
-  )
-}
 
