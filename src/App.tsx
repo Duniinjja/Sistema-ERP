@@ -88,6 +88,65 @@ type ContactItem = {
   documentos?: string[]
   camposExtras?: string
 }
+const sampleContacts = [
+  { id: 'C001', nome: 'Cliente ACME', fones: '(11) 99999-0000', palavra: 'acme', cidade: 'Sao Paulo' },
+  { id: 'C002', nome: 'Loja Centro', fones: '(11) 98888-0000', palavra: 'centro', cidade: 'Campinas' },
+]
+const sampleSales: SaleRecord[] = [
+  {
+    id: 'V001',
+    cliente: 'Loja Centro',
+    vendedor: 'Carlos',
+    data: '2025-11-05',
+    tipo: 'Venda',
+    registro: 'vendas',
+    total: 1520.5,
+    itens: [{ produtoId: 'P001', quantidade: 1, valor: 1520.5 }],
+  },
+  {
+    id: 'V002',
+    cliente: 'ACME',
+    vendedor: 'Ana',
+    data: '2025-11-12',
+    tipo: 'Venda',
+    registro: 'vendas',
+    total: 820.0,
+    itens: [{ produtoId: 'P002', quantidade: 2, valor: 410 }],
+  },
+  {
+    id: 'D001',
+    cliente: 'Cliente Beta',
+    vendedor: 'Carlos',
+    data: '2025-11-18',
+    tipo: 'Devolucao',
+    registro: 'devolucoes',
+    total: 210.0,
+    itens: [{ produtoId: 'P002', quantidade: 1, valor: 210 }],
+  },
+]
+const samplePurchases: PurchaseRecord[] = [
+  {
+    id: 'C001',
+    fornecedor: 'Fornecedor XPTO',
+    nota: 'NF 123',
+    data: '2025-11-03',
+    situacao: 'Pendente',
+    registro: 'compras',
+    total: 450.0,
+    itens: [{ produtoId: 'P001', quantidade: 1, valor: 450 }],
+  },
+  {
+    id: 'C002',
+    fornecedor: 'Loja do Joao',
+    nota: 'NF 124',
+    data: '2025-11-14',
+    situacao: 'Concluida',
+    registro: 'compras',
+    total: 980.0,
+    itens: [{ produtoId: 'P002', quantidade: 2, valor: 410 }],
+  },
+]
+
 type InventoryRecord = {
   id: string
   produtoId: string
