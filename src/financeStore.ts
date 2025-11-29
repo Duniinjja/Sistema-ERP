@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { persistence } from './services/persistence'
 
 export type FinanceTipo = 'recebimento' | 'pagamento' | 'recibo'
 
@@ -8,7 +9,7 @@ export type FinanceEntry = {
   descricao: string
   contato: string
   conta: string
-  data: string // ISO date
+  data: string
   situacao: 'Pendente' | 'Pago' | 'Recebido'
   valor: number
   referente?: string
@@ -58,19 +59,13 @@ const sample: FinanceEntry[] = [
 
 export function useFinanceStore() {
   const [entries, setEntries] = useState<FinanceEntry[]>(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY)
-      if (raw) {
-        return JSON.parse(raw)
-      }
-    } catch (err) {
-      console.warn('Falha ao carregar financeiros do storage', err)
-    }
+    const stored = persistence.read<FinanceEntry[]>(STORAGE_KEY)
+    if (Array.isArray(stored)) return stored
     return sample
   })
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries))
+    persistence.write(STORAGE_KEY, entries)
   }, [entries])
 
   const addEntry = (data: Omit<FinanceEntry, 'id'>) => {
@@ -82,6 +77,7 @@ export function useFinanceStore() {
   const removeEntry = (id: string) => {
     setEntries((prev) => prev.filter((item) => item.id !== id))
   }
+
   const updateEntry = (id: string, data: Partial<FinanceEntry>) => {
     setEntries((prev) => prev.map((item) => (item.id === id ? { ...item, ...data } : item)))
   }
@@ -112,11 +108,5 @@ export function useFinanceStore() {
     }
   }, [entries])
 
-  return {
-    entries,
-    addEntry,
-    removeEntry,
-    updateEntry,
-    summary,
-  }
+  return { entries, addEntry, removeEntry, updateEntry, summary }
 }
