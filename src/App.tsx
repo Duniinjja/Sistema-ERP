@@ -55,17 +55,20 @@ type PurchaseTab = 'compras'
 type ContactTab = 'clientes' | 'fornecedores' | 'transportadoras'
 type ProductTab = 'produtos' | 'servicos' | 'ajuste'
 type PurchaseItem = { produtoId: string; quantidade: number; valor: number }
+
 type PurchaseRecord = {
   id: string
   fornecedor: string
   nota: string
   data: string
-  situacao?: 'Concluida' | 'Rascunho'
+  situacao?: 'Pendente' | 'Concluida' | 'Rascunho'
   itens: PurchaseItem[]
   total: number
   registro?: PurchaseTab
 }
+
 type SaleItem = { produtoId: string; quantidade: number; valor: number }
+
 type SaleRecord = {
   id: string
   cliente: string
@@ -75,23 +78,28 @@ type SaleRecord = {
   registro?: SalesTab
   itens: SaleItem[]
   total: number
-  situacao?: 'Concluida' | 'Rascunho'
+  situacao?: 'Pendente' | 'Concluida' | 'Rascunho'
 }
-type ContactItem = {
-  id: string
-  nome: string
-  fones?: string
-  palavras?: string
-  cidade?: string
-  tipo: ContactTab
-  observacoes?: string
-  documentos?: string[]
-  camposExtras?: string
+
+type SaleForm = {
+  cliente: string
+  vendedor: string
+  data: string
+  tipo: string
+  itens: SaleItem[]
+  total: number
+  situacao: SaleRecord['situacao']
 }
-const sampleContacts = [
-  { id: 'C001', nome: 'Cliente ACME', fones: '(11) 99999-0000', palavra: 'acme', cidade: 'Sao Paulo' },
-  { id: 'C002', nome: 'Loja Centro', fones: '(11) 98888-0000', palavra: 'centro', cidade: 'Campinas' },
-]
+
+type PurchaseForm = {
+  fornecedor: string
+  nota: string
+  data: string
+  situacao: PurchaseRecord['situacao']
+  itens: PurchaseItem[]
+  total: number
+}
+
 const sampleSales: SaleRecord[] = [
   {
     id: 'V001',
@@ -124,6 +132,7 @@ const sampleSales: SaleRecord[] = [
     itens: [{ produtoId: 'P002', quantidade: 1, valor: 210 }],
   },
 ]
+
 const samplePurchases: PurchaseRecord[] = [
   {
     id: 'C001',
@@ -188,7 +197,6 @@ type ToastProps = { message: string | null; onClose: () => void }
 function Toast({ message, onClose }: ToastProps) {
   if (!message) return null
   return (
-    <div className="fixed bottom-4 right-4 bg-emerald-600 text-white px-4 py-2 rounded-md shadow z-50 flex items-center gap-3">
       <span>{message}</span>
       <button className="text-white/80 hover:text-white" onClick={onClose}>
         Fechar
@@ -340,6 +348,19 @@ export default function App() {
     readHash()
     window.addEventListener('hashchange', readHash)
     return () => window.removeEventListener('hashchange', readHash)
+  }, [])
+
+  useEffect(() => {
+    const ensureSeed = (key: string, data: unknown) => {
+      if (!localStorage.getItem(key)) {
+        localStorage.setItem(key, JSON.stringify(data))
+      }
+    }
+    ensureSeed('erp.contatos', sampleContacts)
+    ensureSeed('erp.produtos', produtosSeed)
+    ensureSeed('erp.sales', sampleSales)
+    ensureSeed('erp.compras', samplePurchases)
+    ensureSeed('erp.config.geral', { empresa: 'ERP Wolkan', cnpj: '12.345.678/0001-90' })
   }, [])
 
   useEffect(() => {
@@ -1180,7 +1201,7 @@ function FinanceiroPage({
       conta: current.conta,
       data: current.data,
       valor: String(current.valor).replace('.', ','),
-      situacao: current.situacao,
+      situacao: (current.situacao as SaleForm['situacao']) ?? 'Concluida',
       referente: current.referente || '',
       cpfCnpj: '',
       vias: '1 via',
@@ -1831,20 +1852,21 @@ function VendasPage({
   const [salesToast, setSalesToast] = useState<string | null>(null)
   const [salesModalOpen, setSalesModalOpen] = useState(false)
   const [salesModalMode, setSalesModalMode] = useState<'new' | 'edit'>('new')
-  const buildSalesDefaultForm = useCallback(
-    () => ({
-      cliente: '',
-      vendedor: '',
+    const buildSalesDefaultForm = useCallback(
+    (): SaleForm => ({
+      cliente: ,
+      vendedor: ,
       data: new Date().toISOString().slice(0, 10),
       tipo: activeTab === 'devolucoes' ? 'Devolucao' : 'Venda',
-      itens: [{ produtoId: '', quantidade: 1, valor: 0 }],
+      itens: [{ produtoId: , quantidade: 1, valor: 0 }],
       total: 0,
-      situacao: 'Concluida' as 'Concluida' | 'Rascunho',
+      situacao: 'Concluida' as SaleForm['situacao'],
     }),
     [activeTab],
   )
 
-  const [salesForm, setSalesForm] = useState(buildSalesDefaultForm)
+  const [salesForm, setSalesForm] = useState<SaleForm>(buildSalesDefaultForm)
+
   const [salesEditId, setSalesEditId] = useState<string | null>(null)
 
   const { items: salesItems, add: addSale, update: updateSale, remove: removeSale } = useLocalCrud<SaleRecord>('erp.sales', [
@@ -1973,7 +1995,7 @@ function VendasPage({
           valor: i.valor || 0,
         })) || [{ produtoId: '', quantidade: 1, valor: 0 }],
       total: current.total,
-      situacao: current.situacao || 'Concluida',
+    situacao: (current.situacao as SaleRecord['situacao']) ?? 'Concluida'
     })
     setSalesModalOpen(true)
   }
@@ -2521,17 +2543,19 @@ function ComprasPage({
   const [purchaseModalOpen, setPurchaseModalOpen] = useState(false)
   const [purchaseModalMode, setPurchaseModalMode] = useState<'new' | 'edit'>('new')
   const buildPurchaseDefaultForm = useCallback(
-    () => ({
+    (): PurchaseForm => ({
       fornecedor: '',
       nota: '',
       data: new Date().toISOString().slice(0, 10),
-      situacao: 'Concluida' as 'Concluida' | 'Rascunho',
+      situacao: 'Concluida' as PurchaseForm['situacao'],
       itens: [{ produtoId: '', quantidade: 1, valor: 0 }],
       total: 0,
     }),
     [],
   )
-  const [purchaseForm, setPurchaseForm] = useState(buildPurchaseDefaultForm)
+
+  const [purchaseForm, setPurchaseForm] = useState<PurchaseForm>(buildPurchaseDefaultForm)
+
   const [purchaseEditId, setPurchaseEditId] = useState<string | null>(null)
 
   const { items: compras, add: addCompra, update: updateCompra, remove: removeCompra } = useLocalCrud<PurchaseRecord>('erp.compras', [
@@ -2626,7 +2650,8 @@ function ComprasPage({
       fornecedor: current.fornecedor,
       nota: current.nota,
       data: current.data,
-      situacao: current.situacao || 'Concluida',
+     situacao: ((current.situacao as PurchaseForm['situacao']) ?? 'Concluida') as PurchaseForm['situacao'],
+
       itens:
         current.itens?.map((i: PurchaseItem) => ({
           produtoId: i.produtoId || '',

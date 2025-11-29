@@ -1,0 +1,23 @@
+*** Begin Patch
+*** Update File: src/App.tsx
+@@
+-type SaleRecord = { ... situacao?: 'Pendente' | 'Concluida' | 'Rascunho' ... }
+-type SaleForm = {
+-  cliente: string
+-  vendedor: string
+-  data: string
+-  tipo: string
+-  itens: SaleItem[]
+-  total: number
+-  situacao: SaleRecord['situacao']
+-}
+-type PurchaseForm = {
+-  fornecedor: string
+-  nota: string
+-  data: string
+-  situacao: PurchaseRecord['situacao']
+-  itens: PurchaseItem[]
+-  total: number
+-}
+-
+*** End Patch
