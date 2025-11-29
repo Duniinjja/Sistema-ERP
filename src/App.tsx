@@ -193,14 +193,18 @@ function Modal({ open, title, onClose, children }: ModalProps) {
   )
 }
 
+
 type ToastProps = { message: string | null; onClose: () => void }
 function Toast({ message, onClose }: ToastProps) {
   if (!message) return null
   return (
-      <span>{message}</span>
-      <button className="text-white/80 hover:text-white" onClick={onClose}>
-        Fechar
-      </button>
+    <div className="fixed inset-0 flex items-center justify-center bg-black/40 z-50">
+      <div className="bg-slate-900 text-white rounded-lg shadow-xl px-5 py-3 flex items-center space-x-4">
+        <span>{message}</span>
+        <button className="text-white/80 hover:text-white" onClick={onClose}>
+          Fechar
+        </button>
+      </div>
     </div>
   )
 }
@@ -1852,23 +1856,17 @@ function VendasPage({
   const [salesToast, setSalesToast] = useState<string | null>(null)
   const [salesModalOpen, setSalesModalOpen] = useState(false)
   const [salesModalMode, setSalesModalMode] = useState<'new' | 'edit'>('new')
-    const buildSalesDefaultForm = useCallback(
-    (): SaleForm => ({
-      cliente: ,
-      vendedor: ,
-      data: new Date().toISOString().slice(0, 10),
-      tipo: activeTab === 'devolucoes' ? 'Devolucao' : 'Venda',
-      itens: [{ produtoId: , quantidade: 1, valor: 0 }],
-      total: 0,
-      situacao: 'Concluida' as SaleForm['situacao'],
-    }),
-    [activeTab],
-  )
+  const buildSalesDefaultForm = useCallback((): SaleForm => ({
+    cliente: '',
+    vendedor: '',
+    data: new Date().toISOString().slice(0, 10),
+    tipo: activeTab === 'devolucoes' ? 'Devolucao' : 'Venda',
+    itens: [{ produtoId: '', quantidade: 1, valor: 0 }],
+    total: 0,
+    situacao: 'Concluida' as SaleForm['situacao'],
+  }), [activeTab])
 
   const [salesForm, setSalesForm] = useState<SaleForm>(buildSalesDefaultForm)
-
-  const [salesEditId, setSalesEditId] = useState<string | null>(null)
-
   const { items: salesItems, add: addSale, update: updateSale, remove: removeSale } = useLocalCrud<SaleRecord>('erp.sales', [
     {
       id: 'V001',
