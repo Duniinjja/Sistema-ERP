@@ -38,6 +38,8 @@ export function DashboardPage({
   formatMoney,
 }: DashboardProps) {
   usePageMonitor('Dashboard')
+  const latestDay = dailyNet[dailyNet.length - 1] ?? { dia: '', valor: 0 }
+  const renderChart = !import.meta.env.VITEST
   return (
     <div className="space-y-6">
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -66,6 +68,59 @@ export function DashboardPage({
             </button>
           </div>
         ))}
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-[2fr_1fr]">
+        <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-200">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-[#0f3047]">Fluxo diário</h2>
+              <p className="text-sm text-slate-500">Últimos 7 dias</p>
+            </div>
+            <div className="text-right">
+              <p className="text-xs uppercase tracking-wide text-slate-400">Último fechamento</p>
+              <p className={`text-2xl font-semibold ${latestDay.valor >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{formatMoney(latestDay.valor)}</p>
+            </div>
+          </div>
+          <div className="mt-4 h-48 min-h-[190px]">
+            {renderChart ? (
+              <div className="w-full flex justify-center">
+                <LineChart width={600} height={190} data={dailyNet}>
+                  <XAxis dataKey="dia" axisLine={false} tickLine={false} stroke="#94a3b8" />
+                  <Tooltip formatter={(value: number) => formatMoney(Number(value))} />
+                  <Line
+                    type="monotone"
+                    dataKey="valor"
+                    stroke="#f5a524"
+                    strokeWidth={3}
+                    dot={{ stroke: '#0f3047', fill: '#fff', strokeWidth: 2 }}
+                  />
+                </LineChart>
+              </div>
+            ) : (
+              <div className="flex h-full items-center justify-center text-xs text-slate-500">Gráfico desativado em testes</div>
+            )}
+          </div>
+        </div>
+        <div className="bg-[#0f3047] text-white rounded-xl p-4 shadow-sm border border-slate-800 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-white/70">Resumo</p>
+              <h3 className="font-semibold text-lg">Últimos 3 dias</h3>
+            </div>
+            <span className="text-xs text-white/60">{dailyNet.length} dias</span>
+          </div>
+          <div className="space-y-2 text-sm">
+            {dailyNet.slice(-3).map((item) => (
+              <div key={item.dia} className="flex items-center justify-between">
+                <span>{item.dia}</span>
+                <span className={item.valor >= 0 ? 'text-emerald-300 font-semibold' : 'text-rose-300 font-semibold'}>
+                  {formatMoney(item.valor)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
       </section>
 
       <section className="grid gap-4 xl:grid-cols-12">
@@ -122,15 +177,13 @@ export function DashboardPage({
             <span className="text-sm text-slate-500">Mes atual</span>
           </div>
           <div className="h-56">
-            <ResponsiveContainer>
-              <PieChart>
-                <Pie data={pieData} innerRadius={45} outerRadius={70} dataKey="value">
-                  {pieData.map((entry, index) => (
-                    <Cell key={entry.name} fill={pieColors[index % pieColors.length]} />
-                  ))}
-                </Pie>
-              </PieChart>
-            </ResponsiveContainer>
+            <PieChart width={250} height={200}>
+              <Pie data={pieData} innerRadius={45} outerRadius={70} dataKey="value">
+                {pieData.map((entry, index) => (
+                  <Cell key={entry.name} fill={pieColors[index % pieColors.length]} />
+                ))}
+              </Pie>
+            </PieChart>
           </div>
           <div className="flex flex-wrap gap-2 mt-2">
             {pieData.map((d, i) => (

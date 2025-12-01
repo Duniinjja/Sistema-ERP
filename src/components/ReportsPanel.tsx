@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { Modal } from '../components/Modal'
+import { Toast } from '../components/Toast'
 
 type ReportGroup = {
   title: string
@@ -122,18 +124,6 @@ type ReportsPanelProps = {
   onNavigate: (group: string, name: string) => void
 }
 
-function PanelToast({ message, onClose }: { message: string | null; onClose: () => void }) {
-  if (!message) return null
-  return (
-    <div className="fixed bottom-4 right-4 bg-emerald-600 text-white px-4 py-2 rounded-md shadow z-50 flex items-center gap-3">
-      <span>{message}</span>
-      <button className="text-white/80 hover:text-white" onClick={onClose}>
-        Fechar
-      </button>
-    </div>
-  )
-}
-
 export function ReportsPanel({ onNavigate }: ReportsPanelProps) {
   const [reportSearch, setReportSearch] = useState('')
   const [reportSelected, setReportSelected] = useState<string[]>([])
@@ -158,6 +148,7 @@ export function ReportsPanel({ onNavigate }: ReportsPanelProps) {
     return []
   })
   const [activeReport, setActiveReport] = useState<typeof flatReports[number] | null>(null)
+  const [reportModal, setReportModal] = useState<typeof flatReports[number] | null>(null)
 
   useEffect(() => {
     localStorage.setItem('erp.reports.favorites', JSON.stringify(favorites))
@@ -202,17 +193,27 @@ export function ReportsPanel({ onNavigate }: ReportsPanelProps) {
 
   const toggleGroup = (title: string) => setOpenGroups((prev) => ({ ...prev, [title]: !prev[title] }))
   const toggleFavorite = (reportId: string) =>
-    setFavorites((prev) => (prev.includes(reportId) ? prev.filter((id) => id !== reportId) : [...prev, reportId]))
+    setFavorites((prev) => {
+      const isFavorite = prev.includes(reportId)
+      setReportToast(isFavorite ? 'Removido dos favoritos.' : 'Relatório salvo nos favoritos.')
+      return isFavorite ? prev.filter((id) => id !== reportId) : [...prev, reportId]
+    })
 
-  const handleDetailNavigate = () => {
-    if (activeReport) {
-      onNavigate(activeReport.grupo, activeReport.nome)
-    }
+  const openDetailModal = () => {
+    if (!activeReport) return
+    setReportModal(activeReport)
+  }
+
+  const handleModalConfirm = () => {
+    if (!reportModal) return
+    onNavigate(reportModal.grupo, reportModal.nome)
+    setReportToast(`Abrindo ${reportModal.nome}`)
+    setReportModal(null)
   }
 
   return (
     <section className="space-y-4">
-      <PanelToast message={reportToast} onClose={() => setReportToast(null)} />
+      <Toast message={reportToast} onClose={() => setReportToast(null)} />
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex-1 min-w-[260px]">
           <input
@@ -350,13 +351,26 @@ export function ReportsPanel({ onNavigate }: ReportsPanelProps) {
             <button
               disabled={!activeReport}
               className="w-full text-center bg-amber-500 text-white rounded-md px-3 py-2 text-sm font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
-              onClick={handleDetailNavigate}
+              onClick={openDetailModal}
             >
               Abrir relatório
             </button>
           </div>
         </div>
       </div>
+      <Modal open={Boolean(reportModal)} title={reportModal?.nome ?? 'Detalhes do relatório'} onClose={() => setReportModal(null)}>
+        <p className="text-sm text-slate-600 min-h-[60px]">
+          {reportModal ? reportDescriptions[reportModal.nome] || 'Detalhes sobre o relatório.' : 'Selecione um relatório para continuar.'}
+        </p>
+        <div className="flex justify-end gap-2">
+          <button className="text-sm text-slate-500 hover:underline" onClick={() => setReportModal(null)}>
+            Fechar
+          </button>
+          <button className="bg-amber-500 text-white px-3 py-2 rounded-md text-sm font-semibold" onClick={handleModalConfirm}>
+            Abrir relatório
+          </button>
+        </div>
+      </Modal>
     </section>
   )
 }

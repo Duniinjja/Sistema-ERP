@@ -17,6 +17,15 @@ const entries: FinanceEntry[] = [
 ]
 
 describe('FinanceiroPage', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2025-11-15'))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('renderiza lista sem erros', () => {
     const setActiveTab = vi.fn()
     render(

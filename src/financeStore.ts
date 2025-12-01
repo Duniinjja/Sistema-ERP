@@ -15,6 +15,13 @@ export type FinanceEntry = {
   referente?: string
   comprovante?: string
   conciliado?: boolean
+  categoria?: string
+  palavras?: string
+  observacao?: string
+  emitente?: string
+  vias?: string
+  cpfCnpj?: string
+  reciboDate?: string
 }
 
 const STORAGE_KEY = 'erp.finance.entries'
