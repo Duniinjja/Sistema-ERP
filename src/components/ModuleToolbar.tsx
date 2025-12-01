@@ -4,7 +4,7 @@ export type ToolbarAction = {
   label: string
   onClick: () => void
   variant?: 'primary' | 'ghost'
-  tone?: 'success' | 'danger' | 'purple' | 'info'
+  tone?: 'success' | 'danger' | 'purple' | 'info' | 'dark'
 }
 
 export function ModuleToolbar({
@@ -32,6 +32,8 @@ export function ModuleToolbar({
                 ? 'bg-rose-600 hover:bg-rose-500 text-white'
                 : action.tone === 'purple'
                 ? 'bg-purple-600 hover:bg-purple-500 text-white'
+                : action.tone === 'dark'
+                ? 'bg-indigo-800 hover:bg-indigo-700 text-white'
                 : action.tone === 'info'
                 ? 'bg-sky-600 hover:bg-sky-500 text-white'
                 : 'bg-emerald-600 hover:bg-emerald-500 text-white'
